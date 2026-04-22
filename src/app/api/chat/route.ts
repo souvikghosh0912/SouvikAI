@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { streamNvidiaCompletion, parseSSEStream } from '@/lib/nvidia-nim';
 import { Database } from '@/types/database';
 import type { AttachmentPayload } from '@/types/attachments';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 
 type ProfileRow = Database['public']['Tables']['profiles']['Row'];
@@ -16,17 +16,33 @@ const RPM_LIMIT = 20;
 /** Must match the client-side cap in useChat.ts. */
 const MAX_INPUT_CHARS = 40_000;
 
-// ── System prompt — cached at module load, never blocks a request ─────────────
-// Reads the file once when the server cold-starts. Eliminates the per-request
-// synchronous fs.readFileSync that previously blocked the Node.js event loop.
-const SYSTEM_PROMPT_BASE: string = (() => {
+/** NVIDIA API timeout — fail fast so the client gets a real error, not a hung stream. */
+const NVIDIA_TIMEOUT_MS = 25_000;
+
+// ── System prompt — loaded async per-request with a simple in-process cache ──
+// We avoid module-level synchronous fs.readFileSync which can crash serverless
+// runtimes (e.g. Vercel) where process.cwd() resolves unexpectedly at cold-start.
+let _systemPromptCache: string | null = null;
+
+async function getSystemPrompt(): Promise<string> {
+    // In development, never cache — always read fresh so edits to
+    // system_prompt.txt take effect without restarting the server.
+    if (process.env.NODE_ENV === 'development') {
+        _systemPromptCache = null;
+    }
+
+    if (_systemPromptCache !== null) return _systemPromptCache;
     try {
-        return fs.readFileSync(path.join(process.cwd(), 'system_prompt.txt'), 'utf-8');
+        _systemPromptCache = await fs.readFile(
+            path.join(process.cwd(), 'system_prompt.txt'),
+            'utf-8'
+        );
     } catch {
         console.warn('[Chat] Could not read system_prompt.txt, using default');
-        return 'You are a helpful AI assistant.';
+        _systemPromptCache = 'You are SouvikAI, a helpful and concise AI assistant.';
     }
-})();
+    return _systemPromptCache;
+}
 
 // Rough token estimate: ~4 chars per token
 function estimateTokens(text: string): number {
@@ -35,18 +51,22 @@ function estimateTokens(text: string): number {
 
 export async function POST(request: NextRequest) {
     try {
-        // ── CSRF: verify the request originates from this application ─────────
-        // Browsers always send Origin on cross-site requests; same-origin XHR/fetch
-        // also sends it. We reject anything that doesn't match our host.
+        // ── CSRF: reject requests that explicitly come from a different origin ──
+        // We only enforce when Origin is present and parseable. Same-origin
+        // browser fetches set Origin=<host>; server-to-server and some mobile
+        // clients omit it entirely — those are allowed through.
         const origin = request.headers.get('origin');
         const host   = request.headers.get('host');
-        if (origin) {
+        if (origin && host) {
             try {
                 const originHost = new URL(origin).host;
-                if (originHost !== host) {
+                // Strip port for comparison when both sides use standard ports
+                const normalise = (h: string) => h.replace(/:(?:80|443)$/, '');
+                if (normalise(originHost) !== normalise(host)) {
                     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
                 }
             } catch {
+                // Malformed Origin — deny to be safe
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
             }
         }
@@ -83,12 +103,16 @@ export async function POST(request: NextRequest) {
             supabase.auth.getUser(),
             supabase.from('admin_settings').select('*').single(),
             supabase.from('models').select('*').eq('id', modelId).single(),
-            // chat_messages only needs sessionId + messageId (both from body)
+            // chat_messages only needs sessionId + messageId (both from body).
+            // LIMIT to the last 20 messages — sending unlimited history adds
+            // latency proportional to conversation length. 20 turns covers the
+            // vast majority of context a model actually uses effectively.
             (sessionId && messageId)
                 ? supabase.from('chat_messages').select('role, content')
                     .eq('session_id', sessionId)
                     .neq('id', messageId)
-                    .order('created_at', { ascending: true })
+                    .order('created_at', { ascending: false })
+                    .limit(20)
                 : Promise.resolve({ data: null }),
         ]);
 
@@ -170,6 +194,7 @@ export async function POST(request: NextRequest) {
         // ── Log request (fire-and-forget) ────────────────────────────────────────
         supabase.from('requests_log').insert({
             user_id: user.id,
+            model_id: modelId,
             status: 'completed',
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any).then(({ error }: any) => {
@@ -177,17 +202,25 @@ export async function POST(request: NextRequest) {
         });
 
         // ── Build conversation history ────────────────────────────────────────────
+        // Messages come back newest-first (DESC) so we reverse to restore
+        // chronological order. Each message is trimmed to 4,000 chars to avoid
+        // a single huge attachment/paste blowing up the context window.
+        const MAX_HISTORY_CHARS = 4_000;
         let conversationHistory: { role: 'user' | 'assistant'; content: string }[] = [];
         if (chatHistoryRes.data) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            conversationHistory = (chatHistoryRes.data as any[]).map((m) => ({
-                role: m.role as 'user' | 'assistant',
-                content: m.content,
-            }));
+            conversationHistory = (chatHistoryRes.data as any[])
+                .reverse()                          // restore chronological order
+                .map((m) => ({
+                    role: m.role as 'user' | 'assistant',
+                    content: typeof m.content === 'string' && m.content.length > MAX_HISTORY_CHARS
+                        ? m.content.slice(0, MAX_HISTORY_CHARS) + ' [truncated]'
+                        : m.content,
+                }));
         }
 
-        // ── Build system prompt from module-level cache (zero I/O cost) ──────────
-        let systemPrompt = SYSTEM_PROMPT_BASE;
+        // ── Build system prompt (cached async read — zero cost on warm instances) ─
+        let systemPrompt = await getSystemPrompt();
         if (userSystemPrompt && userSystemPrompt.trim().length > 0) {
             systemPrompt += `\n\nUser Custom Instructions:\n${userSystemPrompt}`;
         }
@@ -223,17 +256,45 @@ export async function POST(request: NextRequest) {
             { role: 'user' as const, content: userContent },
         ];
 
-        const temperature = adminSettings?.temperature || 0.7;
-        const maxTokens = adminSettings?.max_tokens || 2048;
+        const temperature = adminSettings?.temperature ?? 0.7;
+        // Default to 1024 — covers ~750 words which handles most responses well.
+        // 2048 was the old default; the difference in TTFT is significant because
+        // the model has to plan token budgets before generating the first token.
+        const maxTokens = adminSettings?.max_tokens ?? 1024;
         const modelName = dbModel.name || adminSettings?.model_name || 'meta/llama-3.1-8b-instruct';
 
         // ── Stream response + track tokens ───────────────────────────────────────
-        const stream = await streamNvidiaCompletion(apiMessages, {
-            model: modelName,
-            temperature,
-            maxTokens,
-        });
+        // A per-request AbortController ensures the NVIDIA fetch is cancelled
+        // (and the client gets a real error) if the model doesn't respond within
+        // NVIDIA_TIMEOUT_MS. Without this the serverless function silently times
+        // out and the client sees a generic NetworkError.
+        const timeoutController = new AbortController();
+        const timeoutId = setTimeout(
+            () => timeoutController.abort(),
+            NVIDIA_TIMEOUT_MS
+        );
 
+        let stream: ReadableStream<Uint8Array>;
+        try {
+            stream = await streamNvidiaCompletion(apiMessages, {
+                model: modelName,
+                temperature,
+                maxTokens,
+                signal: timeoutController.signal,
+            });
+        } catch (err) {
+            clearTimeout(timeoutId);
+            const isTimeout = (err as Error)?.name === 'AbortError';
+            console.error('[Chat] NVIDIA stream error:', err);
+            return NextResponse.json(
+                { error: isTimeout
+                    ? 'The AI model took too long to respond. Please try again.'
+                    : `Model error: ${(err as Error).message}` },
+                { status: isTimeout ? 504 : 502 }
+            );
+        }
+
+        clearTimeout(timeoutId);
         const textStream = parseSSEStream(stream);
         const reader = textStream.getReader();
         const encoder = new TextEncoder();

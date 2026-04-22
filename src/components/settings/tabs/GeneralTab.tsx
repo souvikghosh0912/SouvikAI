@@ -16,7 +16,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
-import { Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { Loader2, RefreshCw, Sparkles, Archive, ChevronRight } from 'lucide-react';
 import {
     Select,
     SelectContent,
@@ -220,7 +220,12 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ─── Main tab ───────────────────────────────────────────────────────────────
 
-export function GeneralTab() {
+interface GeneralTabProps {
+    /** Called when the user clicks "View archived chats" — navigates to the Archived tab. */
+    onNavigateToArchived?: () => void;
+}
+
+export function GeneralTab({ onNavigateToArchived }: GeneralTabProps = {}) {
     const { preferences, updatePreference, isLoaded } = useChatPreferences();
     const { setTheme } = useTheme();
     const [mounted, setMounted] = useState(false);
@@ -400,6 +405,26 @@ export function GeneralTab() {
                         </p>
                     </div>
                 )}
+            </SettingsCard>
+
+            {/* ── Data ────────────────────────────────────────────────────── */}
+            <SectionLabel>Data</SectionLabel>
+            <SettingsCard>
+                <SettingRow
+                    label="Archived chats"
+                    description="Browse chats you've archived. Open them read-only or restore them to your list."
+                    control={
+                        <button
+                            type="button"
+                            onClick={onNavigateToArchived}
+                            className="flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground transition-colors group"
+                        >
+                            <Archive className="h-4 w-4 shrink-0" />
+                            <span>View</span>
+                            <ChevronRight className="h-3.5 w-3.5 opacity-50 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                    }
+                />
             </SettingsCard>
 
         </div>

@@ -10,6 +10,42 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useState } from 'react';
 import { MessageActions } from './MessageActions';
+// Prism renderer — smaller bundle than highlight.js, better language auto-detection
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Formats a Date as a human-readable timestamp string.
+ * Today → time only (e.g. "3:42 PM"); older → date + time.
+ */
+function formatTimestamp(date: Date): string {
+    const now = new Date();
+    const isToday =
+        date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate();
+
+    if (isToday) {
+        return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
+        ' · ' +
+        date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * Detects the language from a fenced-code className like "language-typescript".
+ * Falls back to "text" so SyntaxHighlighter still renders cleanly.
+ */
+function extractLang(className?: string): string {
+    if (!className) return 'text';
+    const match = className.match(/language-(\w+)/);
+    return match?.[1] ?? 'text';
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 interface MessageBubbleProps {
     message: Message;
@@ -77,7 +113,6 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
     const renderThinkingToggle = () => {
         if (!showThinkingIndicator) return null;
 
-        // If currently thinking: show ShinyText "Thinking..." or expanded thoughts
         if (isThinking || (isLoading && !hasThought)) {
             return (
                 <div
@@ -85,7 +120,7 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
                     onClick={() => hasThought && setIsThoughtExpanded(!isThoughtExpanded)}
                 >
                     <ShinyText
-                        text={isThoughtExpanded && hasThought ? thinkContent : "Thinking..."}
+                        text={isThoughtExpanded && hasThought ? thinkContent : 'Thinking...'}
                         speed={2.5}
                         delay={0.4}
                         color="#6b6b6b"
@@ -97,7 +132,6 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
             );
         }
 
-        // If thinking has finished: show plain text "Thought for X seconds/minutes"
         const seconds = Math.max(1, Math.floor((thoughtDurationMs ?? 0) / 1000));
         const durationText = seconds >= 60
             ? `${Math.floor(seconds / 60)} minute${Math.floor(seconds / 60) > 1 ? 's' : ''}`
@@ -115,39 +149,55 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
         );
     };
 
+    // ── Timestamp ─────────────────────────────────────────────────────────────
+    // Show as a CSS tooltip via title + a custom span that appears on group-hover.
+    // Pure CSS — zero JS, zero extra render cost.
+    const timestampLabel = message.createdAt instanceof Date && !isNaN(message.createdAt.getTime())
+        ? formatTimestamp(message.createdAt)
+        : '';
+
     return (
         <div
             className={cn(
                 'group flex gap-3 md:gap-4 px-2 md:px-4 py-2 animate-fade-in hover:bg-muted/30 transition-colors rounded-xl mx-1 md:mx-2',
-                isUser ? '' : ''
             )}
         >
             <Avatar className={cn(
-                "h-8 w-8 shrink-0 shadow-sm border border-border/50",
-                isUser ? "bg-background" : "bg-primary/10"
+                'h-8 w-8 shrink-0 shadow-sm border border-border/50',
+                isUser ? 'bg-background' : 'bg-primary/10',
             )}>
                 <AvatarFallback className={cn(
-                    "text-xs font-medium",
-                    isUser ? "text-foreground" : "text-primary"
+                    'text-xs font-medium',
+                    isUser ? 'text-foreground' : 'text-primary',
                 )}>
                     {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                 </AvatarFallback>
             </Avatar>
+
             <div className="flex-1 min-w-0 space-y-1">
+                {/* Name row + timestamp tooltip */}
                 <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold text-foreground/80">
                         {isUser ? 'You' : "Souvik's AI"}
                     </p>
+                    {/* Timestamp — fades in only on group-hover to stay out of the way */}
+                    {timestampLabel && (
+                        <span className="text-[11px] text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150 select-none">
+                            {timestampLabel}
+                        </span>
+                    )}
                 </div>
+
+                {/* Message content */}
                 <div className={cn(
-                    "prose prose-invert max-w-none leading-relaxed",
+                    'prose prose-invert max-w-none leading-relaxed',
                     preferences.textSize === 'small' ? 'prose-sm text-sm' :
                         preferences.textSize === 'large' ? 'prose-base text-lg' : 'prose-sm text-base',
-                    "prose-p:text-foreground/90 prose-headings:text-foreground prose-strong:text-foreground prose-strong:font-semibold",
-                    "prose-pre:bg-muted/50 prose-pre:border prose-pre:border-border/50 prose-pre:shadow-sm",
-                    "prose-th:border prose-th:border-border/50 prose-th:bg-muted/30 prose-th:px-4 prose-th:py-2",
-                    "prose-td:border prose-td:border-border/50 prose-td:px-4 prose-td:py-2",
-                    "prose-table:border-collapse prose-table:w-full prose-table:my-4 prose-table:rounded-lg prose-table:overflow-hidden prose-table:border-style-hidden prose-table:shadow-sm ring-1 ring-border/50"
+                    'prose-p:text-foreground/90 prose-headings:text-foreground prose-strong:text-foreground prose-strong:font-semibold',
+                    'prose-pre:bg-transparent prose-pre:p-0 prose-pre:m-0 prose-pre:border-0 prose-pre:shadow-none',
+                    'prose-th:border prose-th:border-border/50 prose-th:bg-muted/30 prose-th:px-4 prose-th:py-2',
+                    'prose-td:border prose-td:border-border/50 prose-td:px-4 prose-td:py-2',
+                    'prose-table:border-collapse prose-table:w-full prose-table:my-4 prose-table:rounded-lg prose-table:overflow-hidden',
                 )}>
                     {!displayContent ? renderThinkingToggle() : (
                         <div className="flex flex-col gap-2">
@@ -156,39 +206,67 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
                                     remarkPlugins={[remarkGfm]}
                                     components={{
                                         p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
+
+                                        // ── Inline code ───────────────────────────────────
                                         code: ({ className, children, ...props }) => {
+                                            const lang = extractLang(className);
                                             const isInline = !className;
                                             const content = String(children).replace(/\n$/, '');
 
                                             if (isInline) {
                                                 return (
-                                                    <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground border border-border/50" {...props}>
+                                                    <code
+                                                        className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground border border-border/50"
+                                                        {...props}
+                                                    >
                                                         {children}
                                                     </code>
                                                 );
                                             }
 
+                                            // ── Fenced code block with syntax highlighting ──
                                             return (
-                                                <div className="relative group/code my-4">
-                                                    <div className="absolute right-2 top-2 opacity-0 group-hover/code:opacity-100 transition-opacity z-10">
+                                                <div className="relative group/code my-4 rounded-xl overflow-hidden border border-border/50 shadow-sm">
+                                                    {/* Header bar: language label + copy button */}
+                                                    <div className="flex items-center justify-between px-4 py-2 bg-[#1d1f21] border-b border-border/40">
+                                                        <span className="text-[11px] font-mono text-muted-foreground/70 uppercase tracking-widest select-none">
+                                                            {lang === 'text' ? 'plaintext' : lang}
+                                                        </span>
                                                         <button
                                                             onClick={() => handleCopy(content)}
-                                                            className="p-1.5 rounded-md bg-background/80 hover:bg-background border border-border shadow-sm text-muted-foreground hover:text-foreground transition-all"
+                                                            className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all"
                                                             title="Copy code"
                                                         >
                                                             {copied === content ? (
-                                                                <Check className="h-4 w-4 text-green-500" />
+                                                                <><Check className="h-3 w-3 text-green-500" />Copied</>
                                                             ) : (
-                                                                <Copy className="h-4 w-4" />
+                                                                <><Copy className="h-3 w-3" />Copy</>
                                                             )}
                                                         </button>
                                                     </div>
-                                                    <code className={cn('block bg-muted/50 p-4 rounded-xl overflow-x-auto border border-border/50 font-mono text-sm', className)} {...props}>
-                                                        {children}
-                                                    </code>
+
+                                                    {/* Highlighted code */}
+                                                    <SyntaxHighlighter
+                                                        language={lang}
+                                                        style={oneDark}
+                                                        customStyle={{
+                                                            margin: 0,
+                                                            padding: '1rem',
+                                                            background: '#1d1f21',
+                                                            fontSize: '0.8125rem',  // 13px
+                                                            lineHeight: '1.6',
+                                                            borderRadius: 0,
+                                                        }}
+                                                        codeTagProps={{ style: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }}
+                                                        wrapLongLines={false}
+                                                    >
+                                                        {content}
+                                                    </SyntaxHighlighter>
                                                 </div>
                                             );
                                         },
+
+                                        // Strip the outer <pre> — SyntaxHighlighter renders its own
                                         pre: ({ children }) => (
                                             <pre className="bg-transparent p-0 m-0 border-0 shadow-none">
                                                 {children}
@@ -204,7 +282,7 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
                     )}
                 </div>
 
-                {/* Action bar — only for completed assistant messages, when enabled in settings */}
+                {/* Action bar — only for completed assistant messages */}
                 {!isUser && !isLoading && displayContent && preferences.showMessageActions && (
                     <MessageActions
                         content={displayContent}

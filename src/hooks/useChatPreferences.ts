@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from 'react';
 
+export type ToneStyle = 'default' | 'formal' | 'casual' | 'technical' | 'friendly';
+export type CharacteristicLevel = 'less' | 'default' | 'more';
+
 export interface ChatPreferences {
     submitBehavior: 'enter' | 'shift-enter';
     textSize: 'small' | 'normal' | 'large';
@@ -21,6 +24,17 @@ export interface ChatPreferences {
     accentColor: 'blue' | 'purple' | 'green' | 'orange' | 'rose' | 'slate';
     /** Display language preference (stored; i18n implementation is out of scope). */
     language: string;
+    // ── Personalization ───────────────────────────────────────────────────────
+    /** Overall response style and tone. */
+    toneStyle: ToneStyle;
+    /** How warm/personal the AI sounds. */
+    warmth: CharacteristicLevel;
+    /** How energetic/enthusiastic the responses are. */
+    enthusiasm: CharacteristicLevel;
+    /** How often the AI uses markdown headers and bullet lists. */
+    headersAndLists: CharacteristicLevel;
+    /** How often the AI includes emoji in responses. */
+    emoji: CharacteristicLevel;
 }
 
 const DEFAULT_PREFERENCES: ChatPreferences = {
@@ -35,7 +49,13 @@ const DEFAULT_PREFERENCES: ChatPreferences = {
     contrast: 'standard',
     accentColor: 'blue',
     language: 'en-US',
+    toneStyle: 'default',
+    warmth: 'default',
+    enthusiasm: 'default',
+    headersAndLists: 'default',
+    emoji: 'default',
 };
+
 
 
 export function useChatPreferences() {

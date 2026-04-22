@@ -60,7 +60,8 @@ export async function sendVerificationCode(email: string): Promise<VerifyResult>
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to send verification code.';
         console.error('[Twilio] sendVerificationCode error:', message);
-        return { success: false, error: 'Could not send verification email. Please try again.' };
+        // Surface the real error during debugging — tighten this after diagnosis
+        return { success: false, error: `Twilio error: ${message}` };
     }
 }
 

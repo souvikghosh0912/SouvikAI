@@ -43,6 +43,8 @@ interface SidebarProps {
     onPinSession: (sessionId: string) => void;
     onArchiveSession: (sessionId: string) => void;
     onSearch: () => void;
+    /** Called when an archived chat is selected from Settings — loads it in the main view. */
+    onOpenArchivedChat?: (sessionId: string) => void;
     isMobileOpen?: boolean;
     onMobileClose?: () => void;
 }
@@ -171,6 +173,7 @@ export function Sidebar({
     onPinSession,
     onArchiveSession,
     onSearch,
+    onOpenArchivedChat,
     isMobileOpen = false,
     onMobileClose,
 }: SidebarProps) {
@@ -468,7 +471,7 @@ export function Sidebar({
                 )}
             </div>
 
-            <SettingsModal open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+            <SettingsModal open={isSettingsOpen} onOpenChange={setIsSettingsOpen} onOpenArchivedChat={onOpenArchivedChat} />
         </>
     );
 }

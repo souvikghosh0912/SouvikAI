@@ -20,6 +20,12 @@ export function useChat() {
     const { preferences } = useChatPreferences();
     const [models, setModels] = useState<AIModel[]>([]);
     const [selectedModelId, setSelectedModelId] = useState<string>('auto');
+    const selectedModelIdRef = useRef<string>('auto');
+
+    // Keep the ref in sync so sendMessage always reads the latest value
+    // without needing selectedModelId in its dependency array (which would
+    // cause it to be re-created on every model change and risk race conditions).
+    selectedModelIdRef.current = selectedModelId;
     const [state, setState] = useState<ChatState>({
         messages: [],
         isLoading: false,
@@ -28,6 +34,7 @@ export function useChat() {
     });
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [sessionsLoaded, setSessionsLoaded] = useState(false);
+    const [isCurrentSessionArchived, setIsCurrentSessionArchived] = useState(false);
     const abortControllerRef = useRef<AbortController | null>(null);
     const loadingUserIdRef = useRef<string | null>(null);
 
@@ -99,6 +106,14 @@ export function useChat() {
             }));
             setState((prev) => ({ ...prev, messages, currentSessionId: sessionId }));
         }
+
+        // Also fetch whether this session is archived so we can show a banner
+        const { data: sessionData } = await (supabase as any)
+            .from('chat_sessions')
+            .select('is_archived')
+            .eq('id', sessionId)
+            .single();
+        setIsCurrentSessionArchived(sessionData?.is_archived ?? false);
     }, []);
 
     // Internal: creates a session in the DB. Called by sendMessage on first message.
@@ -144,6 +159,7 @@ export function useChat() {
             isLoading: false,
             error: null,
         }));
+        setIsCurrentSessionArchived(false);
     }, []);
 
     const selectSession = useCallback(async (sessionId: string) => {
@@ -212,17 +228,18 @@ export function useChat() {
             if (error) console.error('Failed to save message:', error);
         });
 
-        // Update session title if first message (fire and forget)
-        if (state.messages.length === 0) {
-            const title = content.slice(0, 50) + (content.length > 50 ? '...' : '');
+        // On the first message, set a quick placeholder title so the sidebar
+        // isn't blank. The real AI-generated title replaces it asynchronously
+        // once the first response stream finishes.
+        const isFirstMessage = state.messages.length === 0;
+        if (isFirstMessage) {
+            const placeholder = content.slice(0, 40) + (content.length > 40 ? '…' : '');
             setSessions((prev) =>
-                prev.map((s) => (s.id === sessionId ? { ...s, title } : s))
+                prev.map((s) => (s.id === sessionId ? { ...s, title: placeholder } : s))
             );
-
-            (supabase as any).from('chat_sessions').update({ title }).eq('id', sessionId)
-                .then(({ error }: any) => {
-                    if (error) console.error('Failed to update title:', error);
-                });
+            // DB write is also fire-and-forget — AI title will overwrite it shortly
+            ;(supabase as any).from('chat_sessions').update({ title: placeholder }).eq('id', sessionId)
+                .then(({ error }: any) => { if (error) console.error('Failed to set placeholder title:', error); });
         }
 
         // Create abort controller
@@ -247,6 +264,33 @@ export function useChat() {
         }));
 
         try {
+            // ── Compose personalization block from current preferences ────────
+            // Read preferences at call-time (not at hook creation) via the hook
+            // value which is already reactive. The block is plain English so any
+            // model can understand and follow it.
+            const p = preferences;
+            const lines: string[] = [];
+
+            if (p.toneStyle !== 'default') {
+                const toneMap: Record<string, string> = {
+                    formal:    'Use a formal, professional tone.',
+                    casual:    'Use a casual, conversational tone.',
+                    technical: 'Use a precise, technical tone with domain-specific terminology.',
+                    friendly:  'Use a friendly, approachable tone.',
+                };
+                lines.push(toneMap[p.toneStyle] ?? '');
+            }
+            if (p.warmth !== 'default')       lines.push(p.warmth === 'more'    ? 'Be warm and personal in your responses.' : 'Keep responses professional and impersonal.');
+            if (p.enthusiasm !== 'default')   lines.push(p.enthusiasm === 'more' ? 'Be enthusiastic and energetic.' : 'Be measured and understated in tone.');
+            if (p.headersAndLists !== 'default') lines.push(p.headersAndLists === 'more' ? 'Use markdown headers and bullet lists generously to structure your answers.' : 'Avoid markdown headers and bullet lists; prefer flowing prose.');
+            if (p.emoji !== 'default')        lines.push(p.emoji === 'more'     ? 'Include relevant emoji throughout your responses.' : 'Do not use emoji in your responses.');
+
+            const personalizationBlock = lines.filter(Boolean).join(' ');
+            const customSystemPrompt = [
+                p.isSystemPromptSafe && p.systemPrompt ? p.systemPrompt : '',
+                personalizationBlock,
+            ].filter(Boolean).join('\n\n');
+
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -255,11 +299,12 @@ export function useChat() {
                     messageId: userMessage.id,
                     content,
                     attachments: attachmentPayloads,
-                    model: selectedModelId === 'auto' ? 'souvik-ai-1' : selectedModelId,
-                    systemPrompt: preferences.isSystemPromptSafe ? preferences.systemPrompt : '',
+                    model: selectedModelIdRef.current === 'auto' ? 'souvik-ai-1' : selectedModelIdRef.current,
+                    systemPrompt: customSystemPrompt,
                 }),
                 signal: abortControllerRef.current.signal,
             });
+
 
             if (!response.ok) {
                 const error = await response.json();
@@ -295,6 +340,36 @@ export function useChat() {
                 role: 'assistant',
                 content: assistantContent,
             });
+
+            // ── Generate AI title after the first exchange ────────────────────
+            // Fire-and-forget: runs after the stream is fully complete so it
+            // never adds latency to the user's first message. The sidebar title
+            // updates silently when the response arrives.
+            if (isFirstMessage && assistantContent) {
+                fetch('/api/chat/title', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId,
+                        userMessage: content,
+                        assistantMessage: assistantContent
+                            // Strip <think>…</think> tags before sending to the title model
+                            .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                            .trim(),
+                    }),
+                })
+                    .then((res) => res.ok ? res.json() : null)
+                    .then((data) => {
+                        if (data?.title) {
+                            setSessions((prev) =>
+                                prev.map((s) =>
+                                    s.id === sessionId ? { ...s, title: data.title } : s
+                                )
+                            );
+                        }
+                    })
+                    .catch(() => { /* title failure is silent */ });
+            }
 
             setState((prev) => ({ ...prev, isLoading: false }));
         } catch (error) {
@@ -449,6 +524,7 @@ export function useChat() {
         models,
         selectedModelId,
         setSelectedModelId,
+        isCurrentSessionArchived,
         sendMessage,
         regenerateMessage,
         newChat,

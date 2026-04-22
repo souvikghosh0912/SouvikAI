@@ -2,28 +2,62 @@
 
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui';
-import { Settings2, Activity, UserCircle, MessageSquare, Bot, X } from 'lucide-react';
+import { Settings2, Activity, UserCircle, MessageSquare, Bot, X, Archive } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GeneralTab } from './tabs/GeneralTab';
 import { UsageTab } from './tabs/UsageTab';
 import { AccountTab } from './tabs/AccountTab';
 import { PreferencesTab } from './tabs/PreferencesTab';
-import { AIBehaviorTab } from './tabs/AIBehaviorTab';
+import { PersonalizationTab } from './tabs/AIBehaviorTab';
+import { ArchivedChatsTab } from './tabs/ArchivedChatsTab';
 
 interface SettingsModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    /** If provided, called when the user clicks an archived chat — parent should load it. */
+    onOpenArchivedChat?: (sessionId: string) => void;
+    /** If set, the modal opens directly on this tab (e.g. 'archived'). */
+    initialTab?: string;
 }
 
-export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
-    const [activeTab, setActiveTab] = useState('general');
+export function SettingsModal({ open, onOpenChange, onOpenArchivedChat, initialTab }: SettingsModalProps) {
+    const [activeTab, setActiveTab] = useState(initialTab ?? 'general');
+
+    // Sync initialTab if it changes externally (e.g. "View archived" button click)
+    // We use a key-based approach: the parent passes the tab they want.
+    // But since initialTab only sets state once, we need an effect for subsequent changes.
+    // The simplest pattern: expose setActiveTab via a prop callback isn't needed —
+    // instead the parent remounts with a new key or passes a changing initialTab.
+    // We handle it by watching initialTab with an effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const staticInitialTab = initialTab;
+
+    // Track the last seen initialTab so we can jump to a new one without remounting.
+    const [lastInitialTab, setLastInitialTab] = useState(staticInitialTab);
+    if (staticInitialTab !== lastInitialTab) {
+        setLastInitialTab(staticInitialTab);
+        if (staticInitialTab) setActiveTab(staticInitialTab);
+    }
 
     const tabs = [
-        { id: 'general',     name: 'General',          icon: Settings2,    component: GeneralTab },
-        { id: 'ai-behavior', name: 'AI Behavior',       icon: Bot,          component: AIBehaviorTab },
+        { id: 'general',     name: 'General',           icon: Settings2,    component: () => <GeneralTab onNavigateToArchived={() => setActiveTab('archived')} /> },
+        { id: 'ai-behavior', name: 'Personalization',    icon: Bot,          component: PersonalizationTab },
         { id: 'preferences', name: 'Chat Preferences',  icon: MessageSquare, component: PreferencesTab },
         { id: 'usage',       name: 'Usage',             icon: Activity,     component: UsageTab },
         { id: 'account',     name: 'Account',           icon: UserCircle,   component: AccountTab },
+        {
+            id: 'archived',
+            name: 'Archived Chats',
+            icon: Archive,
+            component: () => (
+                <ArchivedChatsTab
+                    onOpenChat={(sessionId) => {
+                        onOpenArchivedChat?.(sessionId);
+                        onOpenChange(false);
+                    }}
+                />
+            ),
+        },
     ];
 
     const activeTabName = tabs.find(t => t.id === activeTab)?.name;
@@ -48,18 +82,20 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     <nav className="flex md:flex-col gap-1 overflow-x-auto md:overflow-y-auto px-4 md:px-3 pb-4 md:pb-0 hide-scrollbar">
                         {tabs.map((tab) => {
                             const isActive = activeTab === tab.id;
+                            const isArchived = tab.id === 'archived';
                             return (
                                 <button
                                     key={tab.id}
                                     onClick={() => setActiveTab(tab.id)}
                                     className={cn(
-                                        'flex-shrink-0 md:w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors text-left',
+                                        'flex-shrink-0 md:w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-colors text-left',
                                         isActive
                                             ? 'bg-muted text-foreground font-medium'
-                                            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                                            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                                        isArchived && !isActive && 'mt-1 border-t border-border/30 pt-3'
                                     )}
                                 >
-                                    <tab.icon className="h-[18px] w-[18px]" strokeWidth={isActive ? 2 : 1.5} />
+                                    <tab.icon className="h-[15px] w-[15px] shrink-0" strokeWidth={isActive ? 2 : 1.5} />
                                     {tab.name}
                                 </button>
                             );

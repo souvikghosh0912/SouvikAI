@@ -7,7 +7,7 @@ import { ChatAccentProvider } from '@/components/chat/ChatAccentProvider';
 import { useAuth } from '@/hooks/useAuth';
 import { useChat } from '@/hooks/useChat';
 import { useQuota } from '@/hooks/useQuota';
-import { Loader2, Menu, UserCircle, Bell } from 'lucide-react';
+import { Loader2, Menu, UserCircle, Bell, Archive } from 'lucide-react';
 import { Button } from '@/components/ui';
 
 interface PendingAction {
@@ -40,6 +40,7 @@ export default function ChatPage() {
         abortRequest,
         selectedModelId,
         setSelectedModelId,
+        isCurrentSessionArchived,
     } = useChat();
 
     // ── QUOTA CHECKING ──────────────────────────────────────────────────────────
@@ -110,6 +111,10 @@ export default function ChatPage() {
                 onDeleteSession={handleDeleteRequest}
                 onPinSession={pinSession}
                 onArchiveSession={handleArchiveRequest}
+                onOpenArchivedChat={(sessionId) => {
+                    // Load the archived session's messages in the main chat view
+                    selectSession(sessionId);
+                }}
                 isMobileOpen={isSidebarOpen}
                 onMobileClose={() => setIsSidebarOpen(false)}
             />
@@ -150,6 +155,14 @@ export default function ChatPage() {
                     </div>
                 </header>
 
+                {/* Archived chat banner */}
+                {isCurrentSessionArchived && (
+                    <div className="flex items-center gap-2.5 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-xs font-medium">
+                        <Archive className="h-3.5 w-3.5 shrink-0" />
+                        This chat is archived. It is read-only — you cannot send new messages.
+                    </div>
+                )}
+
                 {/* Chat Container */}
                 <div className="flex-1 flex flex-col relative overflow-hidden">
                     <ChatContainer
@@ -165,8 +178,8 @@ export default function ChatPage() {
                     />
                 </div>
 
-                {/* Bottom input — only shown during active conversations */}
-                {messages.length > 0 && (
+                {/* Bottom input — only shown during active (non-archived) conversations */}
+                {messages.length > 0 && !isCurrentSessionArchived && (
                     <div className="relative z-20 safe-bottom">
                         {quota.isNearLimit && (
                             <QuotaBanner
