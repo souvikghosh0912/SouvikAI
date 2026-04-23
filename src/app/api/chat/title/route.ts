@@ -105,7 +105,8 @@ Assistant: ${assistantSnippet}`;
         }
 
         // ── Persist the new title ─────────────────────────────────────────────
-        await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
             .from('chat_sessions')
             .update({ title })
             .eq('id', sessionId)
