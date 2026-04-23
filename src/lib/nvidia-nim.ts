@@ -70,11 +70,15 @@ export function parseSSEStream(
     return new ReadableStream({
         async start(controller) {
             let buffer = '';
+            let inReasoning = false;
 
             while (true) {
                 const { done, value } = await reader.read();
 
                 if (done) {
+                    if (inReasoning) {
+                        controller.enqueue('\n</think>\n\n');
+                    }
                     controller.close();
                     break;
                 }
@@ -87,15 +91,37 @@ export function parseSSEStream(
                     if (line.startsWith('data: ')) {
                         const data = line.slice(6);
                         if (data === '[DONE]') {
+                            if (inReasoning) {
+                                controller.enqueue('\n</think>\n\n');
+                                inReasoning = false;
+                            }
                             controller.close();
                             return;
                         }
 
                         try {
-                            const parsed: NvidiaStreamResponse = JSON.parse(data);
-                            const content = parsed.choices[0]?.delta?.content;
-                            if (content) {
-                                controller.enqueue(content);
+                            const parsed: any = JSON.parse(data);
+                            const delta = parsed.choices[0]?.delta;
+
+                            if (delta) {
+                                const r = delta.reasoning_content;
+                                const c = delta.content;
+
+                                if (typeof r === 'string' && r.length > 0) {
+                                    if (!inReasoning) {
+                                        controller.enqueue('<think>\n');
+                                        inReasoning = true;
+                                    }
+                                    controller.enqueue(r);
+                                }
+
+                                if (typeof c === 'string' && c.length > 0) {
+                                    if (inReasoning) {
+                                        controller.enqueue('\n</think>\n\n');
+                                        inReasoning = false;
+                                    }
+                                    controller.enqueue(c);
+                                }
                             }
                         } catch {
                             // Skip malformed JSON
