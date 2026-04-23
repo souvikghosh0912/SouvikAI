@@ -396,7 +396,7 @@ export function useChat() {
                 });
             }
         }
-    }, [user, state.currentSessionId, state.messages.length, createSessionInDB]);
+    }, [user, state.currentSessionId, state.messages.length, createSessionInDB, preferences]);
 
     const abortRequest = useCallback(() => {
         if (abortControllerRef.current) {
