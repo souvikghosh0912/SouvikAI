@@ -83,12 +83,12 @@ export function SearchModal({ open, onClose, sessions, onSelectSession }: Search
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm animate-fadeIn"
+                className="fixed inset-0 z-50 bg-black/60 animate-fadeIn"
                 onClick={onClose}
             />
 
             {/* Modal */}
-            <div className="fixed top-[15%] left-1/2 -translate-x-1/2 z-50 w-full max-w-[560px] px-4 animate-slideDown">
+            <div className="fixed top-[15%] left-1/2 -translate-x-1/2 z-50 w-full max-w-[440px] px-4 animate-slideDown">
                 <div className="bg-[#2a2a2a] rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
                     {/* Search input row */}
                     <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/8">
@@ -99,7 +99,7 @@ export function SearchModal({ open, onClose, sessions, onSelectSession }: Search
                             onChange={e => setQuery(e.target.value)}
                             onKeyDown={handleKeyDown}
                             placeholder="Search your chats…"
-                            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+                            className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
                         />
                         {query && (
                             <button
@@ -119,12 +119,12 @@ export function SearchModal({ open, onClose, sessions, onSelectSession }: Search
                         {filtered.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
                                 <MessageSquare className="h-8 w-8 opacity-30" />
-                                <p className="text-sm">No chats found for &quot;{query}&quot;</p>
+                                <p className="text-xs">No chats found for &quot;{query}&quot;</p>
                             </div>
                         ) : (
                             <>
                                 {!query && (
-                                    <div className="px-4 py-1.5 text-[11px] text-muted-foreground/60 uppercase tracking-wider font-medium">
+                                    <div className="px-4 py-1.5 text-[10px] text-muted-foreground/60 uppercase tracking-wider font-medium">
                                         Recent chats
                                     </div>
                                 )}
@@ -143,13 +143,13 @@ export function SearchModal({ open, onClose, sessions, onSelectSession }: Search
                                     >
                                         <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground/50" />
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-sm truncate font-medium">
+                                            <p className="text-xs truncate font-medium">
                                                 {query
                                                     ? highlightMatch(session.title, query)
                                                     : session.title}
                                             </p>
                                         </div>
-                                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground/50 shrink-0">
+                                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground/50 shrink-0">
                                             <Clock className="h-3 w-3" />
                                             {formatRelativeTime(session.updatedAt)}
                                         </div>
@@ -160,7 +160,7 @@ export function SearchModal({ open, onClose, sessions, onSelectSession }: Search
                     </div>
 
                     {/* Footer hint */}
-                    <div className="px-4 py-2.5 border-t border-white/8 flex items-center gap-4 text-[11px] text-muted-foreground/50">
+                    <div className="px-4 py-2.5 border-t border-white/8 flex items-center gap-4 text-[10px] text-muted-foreground/50">
                         <span className="flex items-center gap-1">
                             <kbd className="font-mono bg-white/5 border border-white/10 rounded px-1">↑↓</kbd>
                             navigate
