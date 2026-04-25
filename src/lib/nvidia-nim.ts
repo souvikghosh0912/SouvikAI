@@ -13,6 +13,7 @@ interface NvidiaStreamResponse {
         delta: {
             role?: string;
             content?: string;
+            reasoning_content?: string;
         };
         finish_reason: string | null;
     }[];
@@ -100,7 +101,7 @@ export function parseSSEStream(
                         }
 
                         try {
-                            const parsed: any = JSON.parse(data);
+                            const parsed = JSON.parse(data) as NvidiaStreamResponse;
                             const delta = parsed.choices[0]?.delta;
 
                             if (delta) {
