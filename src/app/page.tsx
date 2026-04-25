@@ -169,7 +169,7 @@ export default function ChatPage() {
                         messages={messages}
                         isLoading={isLoading}
                         error={error}
-                        onSend={(msg, attachments) => sendMessage(msg, attachments)}
+                        onSend={(msg, attachments, tool) => sendMessage(msg, attachments, tool)}
                         onStop={abortRequest}
                         onRegenerate={regenerateMessage}
                         onSuggestionSelect={(prompt) => setPendingMessage(prompt)}
@@ -189,7 +189,7 @@ export default function ChatPage() {
                             />
                         )}
                         <ChatInput
-                            onSend={(msg, attachments) => sendMessage(msg, attachments)}
+                            onSend={(msg, attachments, tool) => sendMessage(msg, attachments, tool)}
                             onStop={abortRequest}
                             isLoading={isLoading}
                         />
