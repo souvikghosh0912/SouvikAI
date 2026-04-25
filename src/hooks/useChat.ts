@@ -259,10 +259,6 @@ export function useChat() {
                     role: 'assistant',
                     content: '',
                     createdAt: new Date(),
-                    // If the searchWeb tool is active, show the shimmer immediately
-                    ...(tool === 'searchWeb'
-                        ? { webSearch: { query: content, status: 'searching' as const, results: [] } }
-                        : {}),
                 },
             ],
         }));
@@ -295,113 +291,128 @@ export function useChat() {
                 personalizationBlock,
             ].filter(Boolean).join('\n\n');
 
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sessionId,
-                    messageId: userMessage.id,
-                    content,
-                    attachments: attachmentPayloads,
-                    model: selectedModelIdRef.current === 'auto' ? 'souvik-ai-1' : selectedModelIdRef.current,
-                    systemPrompt: customSystemPrompt,
-                    tool,
-                }),
-                signal: abortControllerRef.current.signal,
-            });
+            const runCompletion = async (currentTool?: string, currentSearchResults?: any[], currentSearchQuery?: string) => {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId,
+                        messageId: userMessage.id,
+                        content,
+                        attachments: attachmentPayloads,
+                        model: selectedModelIdRef.current === 'auto' ? 'souvik-ai-1' : selectedModelIdRef.current,
+                        systemPrompt: customSystemPrompt,
+                        tool: currentTool,
+                        searchResults: currentSearchResults,
+                        searchResultsQuery: currentSearchQuery,
+                    }),
+                    signal: abortControllerRef.current?.signal,
+                });
 
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to get response');
+                }
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Failed to get response');
-            }
+                const reader = response.body?.getReader();
+                if (!reader) throw new Error('No response body');
 
-            const reader = response.body?.getReader();
-            if (!reader) throw new Error('No response body');
+                const decoder = new TextDecoder();
+                let assistantContent = '';
+                let searchIntercepted = false;
 
-            const decoder = new TextDecoder();
-            let assistantContent = '';
-            // Tracks whether we have already extracted the SEARCH_RESULTS control chunk
-            let searchControlExtracted = false;
-            const SEARCH_PREFIX = 'SEARCH_RESULTS:';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+                    const chunk = decoder.decode(value);
+                    assistantContent += chunk;
 
-                const chunk = decoder.decode(value);
-                assistantContent += chunk;
-
-                // ── Control chunk extraction ──────────────────────────────────────
-                // The server prepends a single base64-encoded JSON line before the
-                // NVIDIA stream when the searchWeb tool is active:
-                //   SEARCH_RESULTS:<base64>\n<rest of AI response>
-                if (!searchControlExtracted && tool === 'searchWeb') {
-                    if (assistantContent.startsWith(SEARCH_PREFIX)) {
-                        const nlIdx = assistantContent.indexOf('\n');
-                        if (nlIdx !== -1) {
-                            // Full control line received — extract it
-                            const base64 = assistantContent.slice(SEARCH_PREFIX.length, nlIdx);
-                            assistantContent = assistantContent.slice(nlIdx + 1);
-                            searchControlExtracted = true;
-                            try {
-                                const parsed = JSON.parse(atob(base64));
+                    // ── Client-side Tool Coordination ────────────────────────────────
+                    if (currentTool === 'searchWeb' && !currentSearchResults && !searchIntercepted) {
+                        if (assistantContent.includes('<search')) {
+                            const searchMatch = assistantContent.match(/<search>([\s\S]*?)<\/search>/);
+                            if (searchMatch) {
+                                searchIntercepted = true;
+                                const query = searchMatch[1].trim();
+                                
+                                // 1. Abort the current stream since we are pivoting to a search
+                                await reader.cancel();
+                                
+                                // 2. Flip UI to "Searching the web..." shimmer and clear the <search> tags
                                 setState((prev) => ({
                                     ...prev,
                                     messages: prev.messages.map((m) =>
                                         m.id === assistantId
-                                            ? {
-                                                ...m,
-                                                webSearch: {
-                                                    query: parsed.query ?? content,
-                                                    status: 'done' as const,
-                                                    results: parsed.results ?? [],
-                                                },
-                                            }
-                                            : m,
+                                            ? { ...m, content: '', webSearch: { query, status: 'searching', results: [] } }
+                                            : m
                                     ),
                                 }));
-                            } catch (parseErr) {
-                                console.warn('[Chat] Failed to parse web search control chunk:', parseErr);
+
+                                // 3. Perform the web search (client coordinates this so Vercel doesn't timeout)
+                                try {
+                                    const res = await fetch(`/api/tools/web-search?q=${encodeURIComponent(query)}`);
+                                    const data = await res.json();
+                                    
+                                    // 4. Update UI to "done" with source cards
+                                    setState((prev) => ({
+                                        ...prev,
+                                        messages: prev.messages.map((m) =>
+                                            m.id === assistantId
+                                                ? { ...m, webSearch: { query, status: 'done', results: data.results || [] } }
+                                                : m
+                                        ),
+                                    }));
+
+                                    // 5. Kick off a second request to the model with the search results
+                                    await runCompletion(undefined, data.results || [], query);
+                                } catch (e) {
+                                    console.error('[Chat] Search failed, falling back:', e);
+                                    await runCompletion(undefined, [], query);
+                                }
+                                return assistantContent; // Exit the stream reader
                             }
+                            // Still streaming the <search> tag, don't show it to the user yet
+                            continue;
                         }
-                        // Still waiting for the newline — don't render partial control line
-                        continue;
-                    } else if (assistantContent.length > SEARCH_PREFIX.length) {
-                        // Content doesn't start with our prefix → no tool call in this stream
-                        searchControlExtracted = true;
                     }
+
+                    setState((prev) => ({
+                        ...prev,
+                        messages: prev.messages.map((m) =>
+                            m.id === assistantId ? { ...m, content: assistantContent } : m
+                        ),
+                    }));
                 }
+                
+                return assistantContent;
+            };
 
-                setState((prev) => ({
-                    ...prev,
-                    messages: prev.messages.map((m) =>
-                        m.id === assistantId ? { ...m, content: assistantContent } : m
-                    ),
-                }));
-            }
+            const finalContent = await runCompletion(tool);
 
-            // Save assistant message
+            // Save assistant message using the final accumulated content
             await (supabase as any).from('chat_messages').insert({
                 id: assistantId,
                 session_id: sessionId,
                 user_id: user.id,
                 role: 'assistant',
-                content: assistantContent,
+                content: finalContent,
             });
+
+
 
             // ── Generate AI title after the first exchange ────────────────────
             // Fire-and-forget: runs after the stream is fully complete so it
             // never adds latency to the user's first message. The sidebar title
             // updates silently when the response arrives.
-            if (isFirstMessage && assistantContent) {
+            if (isFirstMessage && finalContent) {
                 fetch('/api/chat/title', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         sessionId,
                         userMessage: content,
-                        assistantMessage: assistantContent
+                        assistantMessage: finalContent
                             // Strip <think>…</think> tags before sending to the title model
                             .replace(/<think>[\s\S]*?<\/think>/gi, '')
                             .trim(),

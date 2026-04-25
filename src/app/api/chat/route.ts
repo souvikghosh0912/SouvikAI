@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { streamNvidiaCompletion, parseSSEStream } from '@/lib/nvidia-nim';
 import { Database } from '@/types/database';
 import type { AttachmentPayload } from '@/types/attachments';
-import { searchWeb, formatSearchContext } from '@/lib/web-search';
+import { formatSearchContext } from '@/lib/web-search';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
 
         // ── Parse request body first so we can use modelId / sessionId
         //    in all subsequent parallel queries without waiting for auth. ────────
-        const { sessionId, messageId, content, model, systemPrompt: userSystemPrompt, attachments = [], tool } = await request.json();
+        const { sessionId, messageId, content, model, systemPrompt: userSystemPrompt, attachments = [], tool, searchResults, searchResultsQuery } = await request.json();
         const typedAttachments: AttachmentPayload[] = Array.isArray(attachments) ? attachments : [];
 
         if (!content) {
@@ -257,28 +257,16 @@ export async function POST(request: NextRequest) {
             { role: 'user' as const, content: userContent },
         ];
 
-        // ── Web search (runs before NVIDIA stream so results can be injected) ──────
-        // Only executed when the client explicitly enables the searchWeb tool.
-        let webSearchControlChunk: string | null = null;
-        if (tool === 'searchWeb') {
-            try {
-                const { query, results } = await searchWeb(content);
-                // Encode as base64 so the newline-delimited protocol stays intact
-                const controlPayload = Buffer.from(
-                    JSON.stringify({ query, results }),
-                ).toString('base64');
-                webSearchControlChunk = `SEARCH_RESULTS:${controlPayload}\n`;
-
-                if (results.length > 0) {
-                    // Insert search context as a system message right before the user turn
-                    apiMessages.splice(apiMessages.length - 1, 0, {
-                        role: 'system' as const,
-                        content: formatSearchContext(query, results),
-                    });
-                }
-            } catch (searchErr) {
-                console.warn('[Chat] Web search failed, proceeding without results:', searchErr);
-            }
+        // ── Web search tool instructions & context injection ────────
+        if (tool === 'searchWeb' && (!searchResults || searchResults.length === 0)) {
+            // Tell the model how to use the search tool
+            apiMessages[0].content += `\n\n[TOOL AVAILABLE: searchWeb]\nYou have the ability to search the web. If you need real-time data or up-to-date information to answer the user's prompt, output EXACTLY the following format and nothing else:\n<search>your search query</search>\n\nDo not include any other text. The system will intercept it, perform the search, and give you the results.`;
+        } else if (searchResults && searchResults.length > 0) {
+            // Client already performed the search, inject the results
+            apiMessages.splice(apiMessages.length - 1, 0, {
+                role: 'system' as const,
+                content: formatSearchContext(searchResultsQuery || 'Search', searchResults),
+            });
         }
 
         const temperature = adminSettings?.temperature ?? 0.7;
@@ -330,12 +318,6 @@ export async function POST(request: NextRequest) {
 
         const responseStream = new ReadableStream({
             async start(controller) {
-                // Emit web-search metadata as a control line BEFORE the AI text.
-                // The client strips this line and stores it on the message object.
-                if (webSearchControlChunk) {
-                    controller.enqueue(encoder.encode(webSearchControlChunk));
-                }
-
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) {
