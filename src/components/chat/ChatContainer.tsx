@@ -13,7 +13,7 @@ interface ChatContainerProps {
     messages: Message[];
     isLoading: boolean;
     error: string | null;
-    onSend?: (message: string, attachments: Attachment[]) => void;
+    onSend?: (message: string, attachments: Attachment[], tool?: string) => void;
     onStop?: () => void;
     onRegenerate?: (assistantMessageId: string) => void;
     /** Called when the user clicks a prompt suggestion — pre-fills the empty-state ChatInput. */

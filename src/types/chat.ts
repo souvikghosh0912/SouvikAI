@@ -1,3 +1,17 @@
+export interface WebSearchResult {
+    title: string;
+    url: string;
+    snippet: string;
+    favicon: string;
+}
+
+export interface WebSearchState {
+    query: string;
+    /** 'searching' while the server is fetching; 'done' once results arrive. */
+    status: 'searching' | 'done';
+    results: WebSearchResult[];
+}
+
 export interface Message {
     id: string;
     sessionId: string;
@@ -5,6 +19,8 @@ export interface Message {
     role: 'user' | 'assistant';
     content: string;
     createdAt: Date;
+    /** Present on assistant messages when the searchWeb tool was used. */
+    webSearch?: WebSearchState;
 }
 
 export interface ChatSession {

@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useState } from 'react';
 import { MessageActions } from './MessageActions';
+import { WebSearchIndicator } from './WebSearchIndicator';
 // Prism renderer — smaller bundle than highlight.js, better language auto-detection
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -103,7 +104,11 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
     }
 
     const hasThought = thinkContent.length > 0;
-    const showThinkingIndicator = (isLoading && !displayContent && !hasThought) || isThinking || hasThought;
+    // Suppress the generic Thinking… indicator while web search is in progress —
+    // the WebSearchIndicator shimmer replaces it.
+    const isWebSearching = !isUser && message.webSearch?.status === 'searching';
+    const showThinkingIndicator = !isWebSearching &&
+        ((isLoading && !displayContent && !hasThought) || isThinking || hasThought);
 
     // Track when thinking finishes to lock in the duration
     if (hasThought && !isThinking && thoughtDurationMs === null) {
@@ -199,6 +204,10 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
                     'prose-td:border prose-td:border-border/50 prose-td:px-4 prose-td:py-2',
                     'prose-table:border-collapse prose-table:w-full prose-table:my-4 prose-table:rounded-lg prose-table:overflow-hidden',
                 )}>
+                    {/* Web search indicator — shown above content whenever present */}
+                    {!isUser && message.webSearch && (
+                        <WebSearchIndicator webSearch={message.webSearch} />
+                    )}
                     {!displayContent ? renderThinkingToggle() : (
                         <div className="flex flex-col gap-2">
                             {displayContent && (

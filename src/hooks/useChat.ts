@@ -166,7 +166,7 @@ export function useChat() {
         await loadMessages(sessionId);
     }, [loadMessages]);
 
-    const sendMessage = useCallback(async (content: string, attachments: Attachment[] = []) => {
+    const sendMessage = useCallback(async (content: string, attachments: Attachment[] = [], tool?: string) => {
         if (!user) return;
 
         if (content.length > MAX_INPUT_CHARS) {
@@ -246,7 +246,7 @@ export function useChat() {
         abortControllerRef.current = new AbortController();
 
         // Add empty assistant message BEFORE the fetch so the
-        // "Thinking..." ShinyText indicator shows immediately
+        // "Thinking..." / "Searching..." indicator shows immediately
         const assistantId = crypto.randomUUID();
         setState((prev) => ({
             ...prev,
@@ -259,6 +259,10 @@ export function useChat() {
                     role: 'assistant',
                     content: '',
                     createdAt: new Date(),
+                    // If the searchWeb tool is active, show the shimmer immediately
+                    ...(tool === 'searchWeb'
+                        ? { webSearch: { query: content, status: 'searching' as const, results: [] } }
+                        : {}),
                 },
             ],
         }));
@@ -301,6 +305,7 @@ export function useChat() {
                     attachments: attachmentPayloads,
                     model: selectedModelIdRef.current === 'auto' ? 'souvik-ai-1' : selectedModelIdRef.current,
                     systemPrompt: customSystemPrompt,
+                    tool,
                 }),
                 signal: abortControllerRef.current.signal,
             });
@@ -316,6 +321,9 @@ export function useChat() {
 
             const decoder = new TextDecoder();
             let assistantContent = '';
+            // Tracks whether we have already extracted the SEARCH_RESULTS control chunk
+            let searchControlExtracted = false;
+            const SEARCH_PREFIX = 'SEARCH_RESULTS:';
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -323,6 +331,47 @@ export function useChat() {
 
                 const chunk = decoder.decode(value);
                 assistantContent += chunk;
+
+                // ── Control chunk extraction ──────────────────────────────────────
+                // The server prepends a single base64-encoded JSON line before the
+                // NVIDIA stream when the searchWeb tool is active:
+                //   SEARCH_RESULTS:<base64>\n<rest of AI response>
+                if (!searchControlExtracted && tool === 'searchWeb') {
+                    if (assistantContent.startsWith(SEARCH_PREFIX)) {
+                        const nlIdx = assistantContent.indexOf('\n');
+                        if (nlIdx !== -1) {
+                            // Full control line received — extract it
+                            const base64 = assistantContent.slice(SEARCH_PREFIX.length, nlIdx);
+                            assistantContent = assistantContent.slice(nlIdx + 1);
+                            searchControlExtracted = true;
+                            try {
+                                const parsed = JSON.parse(atob(base64));
+                                setState((prev) => ({
+                                    ...prev,
+                                    messages: prev.messages.map((m) =>
+                                        m.id === assistantId
+                                            ? {
+                                                ...m,
+                                                webSearch: {
+                                                    query: parsed.query ?? content,
+                                                    status: 'done' as const,
+                                                    results: parsed.results ?? [],
+                                                },
+                                            }
+                                            : m,
+                                    ),
+                                }));
+                            } catch (parseErr) {
+                                console.warn('[Chat] Failed to parse web search control chunk:', parseErr);
+                            }
+                        }
+                        // Still waiting for the newline — don't render partial control line
+                        continue;
+                    } else if (assistantContent.length > SEARCH_PREFIX.length) {
+                        // Content doesn't start with our prefix → no tool call in this stream
+                        searchControlExtracted = true;
+                    }
+                }
 
                 setState((prev) => ({
                     ...prev,

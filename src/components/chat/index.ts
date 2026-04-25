@@ -8,3 +8,4 @@ export { ChatContainer } from './ChatContainer';
 export { SearchModal } from './SearchModal';
 export { ConfirmModal } from './ConfirmModal';
 export { QuotaBanner } from './QuotaBanner';
+export { WebSearchIndicator } from './WebSearchIndicator';
