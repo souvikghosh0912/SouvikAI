@@ -344,35 +344,57 @@ export function useChat() {
             // ── Web search: run BEFORE calling the model ─────────────────────
             // When the user clicks the "Search the web" tool we run the search
             // up-front, show the shimmer immediately, and then make a single
-            // grounded LLM call. Previously we asked the model to decide
-            // whether to emit a <search>...</search> tag — small models
-            // ignored or malformed the tag, breaking the feature in two ways
-            // ("no shimmer at all" and "shimmer but zero sources").
+            // grounded LLM call. The server first rewrites the user's
+            // natural-language message into a focused search query (e.g.
+            // "Hey, what's the latest Next.js?" → "Next.js latest stable
+            // version 2026") and returns both the rewritten query and the
+            // results so we can show the user what was actually searched.
             let finalContent: string;
             if (tool === 'searchWeb') {
-                // Tavily caps queries at ~400 chars. Trim to 300 to be safe;
-                // a focused query also tends to return better results.
-                const query = content.slice(0, 300).trim();
-
-                // 1. Show "Searching the web…" shimmer immediately.
+                // 1. Show "Searching the web…" shimmer immediately, with a
+                //    placeholder query that we'll replace once the server
+                //    returns the rewritten one.
                 setState((prev) => ({
                     ...prev,
                     messages: prev.messages.map((m) =>
                         m.id === assistantId
-                            ? { ...m, content: '', webSearch: { query, status: 'searching', results: [] } }
+                            ? {
+                                  ...m,
+                                  content: '',
+                                  webSearch: {
+                                      query: content.slice(0, 80),
+                                      status: 'searching',
+                                      results: [],
+                                  },
+                              }
                             : m
                     ),
                 }));
 
-                // 2. Run the search. Failures degrade to an empty result set —
-                //    the model is told the search came up empty and will say so.
+                // 2. Snapshot recent conversation so the rewriter can resolve
+                //    pronouns and references ("what about its release date?").
+                //    state.messages still holds the pre-send view here because
+                //    setState is async — even if it didn't, we filter to the
+                //    user/assistant pair history excluding the new placeholder.
+                const historyForRewrite = state.messages
+                    .filter((m) => m.id !== userMessage.id && m.id !== assistantId)
+                    .slice(-6)
+                    .map((m) => ({ role: m.role, content: m.content }));
+
+                let searchQuery = content.slice(0, 300).trim();
                 let searchResults: WebSearchResult[] = [];
                 try {
-                    const res = await fetch(`/api/tools/web-search?q=${encodeURIComponent(query)}`, {
+                    const res = await fetch('/api/tools/web-search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: content, history: historyForRewrite }),
                         signal: abortControllerRef.current?.signal,
                     });
                     if (res.ok) {
                         const data = await res.json();
+                        if (typeof data.query === 'string' && data.query.length > 0) {
+                            searchQuery = data.query;
+                        }
                         searchResults = Array.isArray(data.results) ? data.results : [];
                     }
                 } catch (e) {
@@ -381,19 +403,25 @@ export function useChat() {
                     }
                 }
 
-                // 3. Surface the source cards (or empty state) before the
-                //    grounded answer streams in.
+                // 3. Update the indicator with the rewritten query + results.
                 setState((prev) => ({
                     ...prev,
                     messages: prev.messages.map((m) =>
                         m.id === assistantId
-                            ? { ...m, webSearch: { query, status: 'done', results: searchResults } }
+                            ? {
+                                  ...m,
+                                  webSearch: {
+                                      query: searchQuery,
+                                      status: 'done',
+                                      results: searchResults,
+                                  },
+                              }
                             : m
                     ),
                 }));
 
                 // 4. Now ask the model, grounded in the results.
-                finalContent = await runCompletion(searchResults, query);
+                finalContent = await runCompletion(searchResults, searchQuery);
             } else {
                 finalContent = await runCompletion();
             }
