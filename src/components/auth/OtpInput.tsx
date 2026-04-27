@@ -4,7 +4,7 @@ import { useRef, KeyboardEvent, ClipboardEvent, ChangeEvent } from 'react';
 import { cn } from '@/lib/utils';
 
 interface OtpInputProps {
-    value: string;           // always 6 chars (padded with '' internally)
+    value: string;
     onChange: (val: string) => void;
     disabled?: boolean;
     hasError?: boolean;
@@ -13,10 +13,8 @@ interface OtpInputProps {
 const LENGTH = 6;
 
 /**
- * Six individual single-character boxes that behave like a unified OTP field.
- * - Typing moves focus right automatically.
- * - Backspace clears the current box and moves focus left.
- * - Pasting a 6-digit string fills all boxes at once.
+ * Six single-character boxes that behave as a unified OTP field.
+ * Monospaced digits, monochrome design, accent-on-focus.
  */
 export function OtpInput({ value, onChange, disabled, hasError }: OtpInputProps) {
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -31,27 +29,23 @@ export function OtpInput({ value, onChange, disabled, hasError }: OtpInputProps)
     const handleChange = (e: ChangeEvent<HTMLInputElement>, index: number) => {
         const raw = e.target.value.replace(/\D/g, '');
         if (!raw) return;
-
-        const char = raw[raw.length - 1]; // only last digit if multiple typed
-        const newDigits = [...digits];
-        newDigits[index] = char;
-        onChange(newDigits.join(''));
-
+        const char = raw[raw.length - 1];
+        const next = [...digits];
+        next[index] = char;
+        onChange(next.join(''));
         if (index < LENGTH - 1) focus(index + 1);
     };
 
     const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, index: number) => {
         if (e.key === 'Backspace') {
             e.preventDefault();
-            const newDigits = [...digits];
-            if (newDigits[index]) {
-                // clear current box
-                newDigits[index] = '';
-                onChange(newDigits.join(''));
+            const next = [...digits];
+            if (next[index]) {
+                next[index] = '';
+                onChange(next.join(''));
             } else {
-                // move back and clear
-                newDigits[Math.max(0, index - 1)] = '';
-                onChange(newDigits.join(''));
+                next[Math.max(0, index - 1)] = '';
+                onChange(next.join(''));
                 focus(index - 1);
             }
         } else if (e.key === 'ArrowLeft') {
@@ -67,41 +61,53 @@ export function OtpInput({ value, onChange, disabled, hasError }: OtpInputProps)
         e.preventDefault();
         const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, LENGTH);
         if (pasted) {
-            const newDigits = pasted.split('').concat(Array(LENGTH).fill('')).slice(0, LENGTH);
-            onChange(newDigits.join(''));
+            const next = pasted.split('').concat(Array(LENGTH).fill('')).slice(0, LENGTH);
+            onChange(next.join(''));
             focus(Math.min(pasted.length, LENGTH - 1));
         }
     };
 
     return (
-        <div className="flex gap-2 justify-center" role="group" aria-label="One-time password">
-            {digits.map((digit, i) => (
-                <input
-                    key={i}
-                    ref={(el) => { inputRefs.current[i] = el; }}
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={1}
-                    value={digit}
-                    disabled={disabled}
-                    autoComplete={i === 0 ? 'one-time-code' : 'off'}
-                    aria-label={`Digit ${i + 1}`}
-                    onChange={(e) => handleChange(e, i)}
-                    onKeyDown={(e) => handleKeyDown(e, i)}
-                    onPaste={handlePaste}
-                    onFocus={(e) => e.target.select()}
-                    className={cn(
-                        'w-11 h-13 text-center text-xl font-semibold rounded-xl border bg-background/50',
-                        'transition-all duration-150 outline-none',
-                        'focus:ring-2 focus:ring-primary/60 focus:border-primary',
-                        hasError
-                            ? 'border-destructive/70 bg-destructive/5 text-destructive'
-                            : 'border-input/60 text-foreground',
-                        disabled && 'opacity-50 cursor-not-allowed',
-                    )}
-                    style={{ height: '3.25rem' }}
-                />
-            ))}
+        <div
+            className="flex justify-center gap-2"
+            role="group"
+            aria-label="One-time password"
+        >
+            {digits.map((digit, i) => {
+                const isFilled = !!digit;
+                return (
+                    <input
+                        key={i}
+                        ref={(el) => {
+                            inputRefs.current[i] = el;
+                        }}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        value={digit}
+                        disabled={disabled}
+                        autoComplete={i === 0 ? 'one-time-code' : 'off'}
+                        aria-label={`Digit ${i + 1}`}
+                        aria-invalid={hasError || undefined}
+                        onChange={(e) => handleChange(e, i)}
+                        onKeyDown={(e) => handleKeyDown(e, i)}
+                        onPaste={handlePaste}
+                        onFocus={(e) => e.target.select()}
+                        className={cn(
+                            'w-11 h-12 text-center font-mono text-2xl text-foreground',
+                            'rounded-md border bg-surface outline-none',
+                            'transition-[border-color,background-color,box-shadow] duration-150 ease-out',
+                            'focus:border-ring focus:bg-surface-2 focus:shadow-[0_0_0_1px_hsl(var(--ring))]',
+                            hasError
+                                ? 'border-destructive focus:border-destructive focus:shadow-[0_0_0_1px_hsl(var(--destructive))]'
+                                : isFilled
+                                    ? 'border-border-strong'
+                                    : 'border-border',
+                            disabled && 'opacity-50 cursor-not-allowed'
+                        )}
+                    />
+                );
+            })}
         </div>
     );
 }

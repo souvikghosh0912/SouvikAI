@@ -2,7 +2,12 @@
 'use client';
 
 import { useChatPreferences } from '@/hooks/useChatPreferences';
-import { Loader2, Command, CornerDownLeft } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { SectionLabel, SettingRow, SettingsCard } from '../primitives';
+
+type SubmitBehavior = 'enter' | 'shift-enter';
+type TextSize = 'small' | 'normal' | 'large';
 
 export function PreferencesTab() {
     const { preferences, updatePreference, isLoaded } = useChatPreferences();
@@ -10,78 +15,111 @@ export function PreferencesTab() {
     if (!isLoaded) {
         return (
             <div className="flex h-40 items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <Loader2 className="h-5 w-5 animate-spin text-foreground-muted" />
             </div>
         );
     }
 
     return (
-        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300 text-[13px] pb-3">
-            {/* Send Behavior */}
-            <div className="space-y-2.5 pb-4 border-b border-border/50">
-                <div>
-                    <h3 className="text-[13px] text-foreground font-medium">Send message behavior</h3>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                        Choose what keyboard shortcut submits your message inside the chat box.
-                    </p>
-                </div>
+        <div className="space-y-1 animate-in fade-in slide-in-from-bottom-1 duration-200 pb-4">
+            {/* Send behavior */}
+            <SectionLabel>Send behavior</SectionLabel>
+            <SettingsCard>
+                <SettingRow
+                    stacked
+                    label="When you press Enter"
+                    description="Choose what keyboard shortcut submits your message in the chat box."
+                    control={
+                        <Segmented<SubmitBehavior>
+                            value={preferences.submitBehavior}
+                            onChange={(v) => updatePreference('submitBehavior', v)}
+                            options={[
+                                { value: 'enter', label: 'Send' },
+                                { value: 'shift-enter', label: 'New line' },
+                            ]}
+                            ariaLabel="Send behavior"
+                        />
+                    }
+                />
+                <SettingRow
+                    label={
+                        preferences.submitBehavior === 'enter'
+                            ? 'Send key: Enter'
+                            : 'Send key: ⌘ / Ctrl + Enter'
+                    }
+                    description={
+                        preferences.submitBehavior === 'enter'
+                            ? 'Shift + Enter inserts a new line.'
+                            : 'Enter inserts a new line.'
+                    }
+                />
+            </SettingsCard>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Text size */}
+            <SectionLabel>Reading</SectionLabel>
+            <SettingsCard>
+                <SettingRow
+                    stacked
+                    label="Chat font size"
+                    description="Adjust the size of text in AI-generated messages."
+                    control={
+                        <Segmented<TextSize>
+                            value={preferences.textSize}
+                            onChange={(v) => updatePreference('textSize', v)}
+                            options={[
+                                { value: 'small', label: 'Small' },
+                                { value: 'normal', label: 'Normal' },
+                                { value: 'large', label: 'Large' },
+                            ]}
+                            ariaLabel="Chat font size"
+                        />
+                    }
+                />
+            </SettingsCard>
+        </div>
+    );
+}
+
+/* ── Segmented control (single-border parent, no per-button tiles) ─── */
+
+function Segmented<T extends string>({
+    value,
+    onChange,
+    options,
+    ariaLabel,
+}: {
+    value: T;
+    onChange: (v: T) => void;
+    options: { value: T; label: string }[];
+    ariaLabel: string;
+}) {
+    return (
+        <div
+            role="radiogroup"
+            aria-label={ariaLabel}
+            className="inline-flex items-center gap-0.5 rounded-md border border-border bg-surface-2 p-0.5"
+        >
+            {options.map((opt) => {
+                const isActive = value === opt.value;
+                return (
                     <button
-                        onClick={() => updatePreference('submitBehavior', 'enter')}
-                        className={`flex flex-col items-start p-2.5 border rounded-lg transition-all text-left ${preferences.submitBehavior === 'enter'
-                            ? 'border-primary bg-primary/10'
-                            : 'border-border bg-card hover:bg-white/5'
-                            }`}
+                        key={opt.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={isActive}
+                        onClick={() => onChange(opt.value)}
+                        className={cn(
+                            'h-7 px-3 rounded-[4px] text-[12px] font-medium transition-colors',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                            isActive
+                                ? 'bg-surface text-foreground shadow-subtle'
+                                : 'text-foreground-muted hover:text-foreground'
+                        )}
                     >
-                        <div className="flex items-center gap-1.5 mb-1">
-                            <CornerDownLeft className={`h-3.5 w-3.5 ${preferences.submitBehavior === 'enter' ? 'text-primary' : 'text-muted-foreground'}`} />
-                            <span className="text-[12px] font-medium text-foreground">Enter</span>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground leading-snug">Pressing Enter sends. Shift+Enter inserts a new line.</p>
+                        {opt.label}
                     </button>
-
-                    <button
-                        onClick={() => updatePreference('submitBehavior', 'shift-enter')}
-                        className={`flex flex-col items-start p-2.5 border rounded-lg transition-all text-left ${preferences.submitBehavior === 'shift-enter'
-                            ? 'border-primary bg-primary/10'
-                            : 'border-border bg-card hover:bg-white/5'
-                            }`}
-                    >
-                        <div className="flex items-center gap-1.5 mb-1">
-                            <Command className={`h-3.5 w-3.5 ${preferences.submitBehavior === 'shift-enter' ? 'text-primary' : 'text-muted-foreground'}`} />
-                            <span className="text-[12px] font-medium text-foreground">Cmd / Ctrl + Enter</span>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground leading-snug">Enter inserts a new line. Cmd/Ctrl + Enter sends.</p>
-                    </button>
-                </div>
-            </div>
-
-            {/* Text Size */}
-            <div className="space-y-2.5">
-                <div>
-                    <h3 className="text-[13px] text-foreground font-medium">Chat font size</h3>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                        Adjust the size of the text within the AI generated chat bubbles.
-                    </p>
-                </div>
-
-                <div className="flex gap-2">
-                    {['small', 'normal', 'large'].map((size) => (
-                        <button
-                            key={size}
-                            onClick={() => updatePreference('textSize', size as any)}
-                            className={`flex-1 py-2 px-3 border rounded-lg transition-all text-center text-[12px] capitalize font-medium ${preferences.textSize === size
-                                ? 'border-primary bg-primary/10 text-primary'
-                                : 'border-border bg-card hover:bg-white/5 text-foreground'
-                                }`}
-                        >
-                            {size}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
+                );
+            })}
         </div>
     );
 }

@@ -16,18 +16,15 @@ import {
     ListFilter,
     ChevronDown,
     Inbox,
-    Star,
-    Triangle,
-    CircleDashed,
     Loader2,
     Menu,
-    PanelLeftClose,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { ChatSession } from '@/types/chat';
 import { ConfirmModal, Sidebar, SearchModal } from '@/components/chat';
 import { ChatAccentProvider } from '@/components/chat/ChatAccentProvider';
+import { Button } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/utils/date-helpers';
 
@@ -48,14 +45,15 @@ const FILTER_LABEL: Record<FilterId, string> = {
 };
 
 const SORT_LABEL: Record<SortId, string> = {
-    recent: 'Updated',
-    oldest: 'Oldest',
-    az: 'Title (A-Z)',
+    recent: 'Most recent',
+    oldest: 'Oldest first',
+    az: 'Title (A–Z)',
 };
 
 // ────────────────────────────────────────────────────────────────────────────
-// Page component
+// Page
 // ────────────────────────────────────────────────────────────────────────────
+
 export default function AllChatsPage() {
     const router = useRouter();
     const { user, isLoading: authLoading, isAuthenticated } = useAuth();
@@ -78,7 +76,7 @@ export default function AllChatsPage() {
         }
     }, [authLoading, isAuthenticated, router]);
 
-    // ── Load all sessions (including archived; we filter client-side) ──
+    // ── Load all sessions ──
     const loadAllSessions = useCallback(async (userId: string) => {
         setLoading(true);
         const { data, error } = await supabase
@@ -120,7 +118,6 @@ export default function AllChatsPage() {
             setRenamingId(null);
             return;
         }
-        // Optimistic
         setSessions((prev) =>
             prev.map((s) => (s.id === renamingId ? { ...s, title: trimmed } : s))
         );
@@ -233,7 +230,8 @@ export default function AllChatsPage() {
         let list = sessions;
 
         if (filter === 'all') list = list.filter((s) => !s.isArchived);
-        else if (filter === 'pinned') list = list.filter((s) => s.isPinned && !s.isArchived);
+        else if (filter === 'pinned')
+            list = list.filter((s) => s.isPinned && !s.isArchived);
         else if (filter === 'archived') list = list.filter((s) => s.isArchived);
 
         const q = query.trim().toLowerCase();
@@ -248,7 +246,6 @@ export default function AllChatsPage() {
             sorted.sort((a, b) => a.title.localeCompare(b.title));
         }
 
-        // Pinned always on top within "all" view
         if (filter === 'all') {
             sorted.sort((a, b) => {
                 if (a.isPinned && !b.isPinned) return -1;
@@ -260,7 +257,6 @@ export default function AllChatsPage() {
         return sorted;
     }, [sessions, filter, query, sort]);
 
-    // Sessions to feed to the Sidebar (sidebar shows non-archived only).
     const sidebarSessions = useMemo(
         () => sessions.filter((s) => !s.isArchived),
         [sessions]
@@ -269,15 +265,14 @@ export default function AllChatsPage() {
     // ── Render ──
     if (authLoading || !isAuthenticated) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-[#212121]">
-                <Loader2 className="h-6 w-6 animate-spin text-white/60" />
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <Loader2 className="h-5 w-5 animate-spin text-foreground-muted" />
             </div>
         );
     }
 
     return (
         <ChatAccentProvider>
-            {/* Sidebar (kept visible on the chats page) */}
             <Sidebar
                 sessions={sidebarSessions}
                 currentSessionId={null}
@@ -293,65 +288,79 @@ export default function AllChatsPage() {
                 onMobileClose={() => setIsSidebarOpen(false)}
             />
 
-            {/* Main area */}
-            <div className="flex-1 flex flex-col min-w-0 relative z-10">
-                {/* Compact top bar (mobile sidebar trigger only) */}
-                <header className="flex items-center justify-between px-2 md:px-3 py-2 bg-[#212121] sticky top-0 z-20">
+            {/* Main */}
+            <div className="flex-1 flex flex-col min-w-0 relative z-10 bg-background">
+                {/* Top bar (mobile sidebar trigger only) */}
+                <header className="flex items-center justify-between h-12 px-3 md:px-5 bg-background sticky top-0 z-20 border-b border-border-subtle">
                     <button
                         onClick={() => setIsSidebarOpen(true)}
-                        className="md:hidden h-9 w-9 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                        className="md:hidden h-8 w-8 flex items-center justify-center rounded-md text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors"
                         aria-label="Open sidebar"
                     >
-                        <Menu className="h-5 w-5" />
+                        <Menu className="h-4.5 w-4.5" strokeWidth={1.5} />
                     </button>
-                    <div className="hidden md:flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground/50">
-                        <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
-                    </div>
+                    <div className="hidden md:block" />
                 </header>
 
-                {/* Scrollable content */}
+                {/* Body */}
                 <div className="flex-1 overflow-y-auto">
-                    <div className="max-w-[1100px] mx-auto px-6 md:px-10 lg:px-14 pt-4 md:pt-6 pb-16">
-                        {/* Title */}
-                        <h1 className="text-[28px] md:text-[32px] font-semibold tracking-tight text-foreground mb-5 md:mb-6">
-                            Chats
-                        </h1>
+                    <div className="max-w-[1100px] mx-auto px-6 md:px-10 lg:px-14 pt-8 md:pt-10 pb-16">
+                        {/* Title + subtitle */}
+                        <div className="mb-7">
+                            <h1 className="text-2xl md:text-[28px] font-semibold tracking-tight text-foreground text-balance">
+                                Chats
+                            </h1>
+                            <p className="mt-1.5 text-[14px] text-foreground-muted leading-relaxed">
+                                Search, filter, and revisit your conversations.
+                            </p>
+                        </div>
 
-                        {/* Search row */}
-                        <div className="flex items-stretch gap-2 mb-3">
+                        {/* Toolbar */}
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+                            {/* Search */}
                             <div className="relative flex-1">
-                                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70 pointer-events-none" />
+                                <Search
+                                    className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-foreground-subtle pointer-events-none"
+                                    strokeWidth={1.5}
+                                />
                                 <input
                                     type="text"
                                     value={query}
                                     onChange={(e) => setQuery(e.target.value)}
-                                    placeholder="Search chats..."
-                                    className="w-full h-10 pl-10 pr-9 rounded-lg bg-white/[0.03] border border-white/[0.08] focus:border-white/[0.2] focus:bg-white/[0.05] text-[14px] text-foreground placeholder:text-muted-foreground/60 outline-none transition-colors"
+                                    placeholder="Search chats…"
+                                    className={cn(
+                                        'w-full h-9 pl-9 pr-9 rounded-md text-[14px] text-foreground placeholder:text-foreground-subtle outline-none',
+                                        'bg-surface-2 border border-border',
+                                        'focus:bg-surface focus:border-ring focus:shadow-[0_0_0_1px_hsl(var(--ring))]',
+                                        'transition-[border-color,background-color,box-shadow] duration-150'
+                                    )}
                                 />
                                 {query && (
                                     <button
                                         onClick={() => setQuery('')}
-                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors"
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 flex items-center justify-center rounded-sm text-foreground-muted hover:text-foreground hover:bg-surface-3 transition-colors"
                                         aria-label="Clear search"
                                     >
-                                        <X className="h-3.5 w-3.5" />
+                                        <X className="h-3.5 w-3.5" strokeWidth={1.5} />
                                     </button>
                                 )}
                             </div>
 
-                            <SortMenu sort={sort} onChange={setSort} />
-
-                            <button
-                                onClick={handleNewChat}
-                                className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-foreground text-[13px] font-medium border border-white/[0.1] transition-colors"
-                            >
-                                <Plus className="h-4 w-4" />
-                                <span>New chat</span>
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <SortMenu sort={sort} onChange={setSort} />
+                                <Button
+                                    onClick={handleNewChat}
+                                    size="default"
+                                    className="shrink-0"
+                                >
+                                    <Plus className="h-4 w-4" strokeWidth={1.75} />
+                                    New chat
+                                </Button>
+                            </div>
                         </div>
 
-                        {/* Filter button */}
-                        <div className="mb-5">
+                        {/* Filter pill */}
+                        <div className="mb-6">
                             <FilterMenu
                                 filter={filter}
                                 counts={counts}
@@ -360,32 +369,24 @@ export default function AllChatsPage() {
                         </div>
 
                         {/* Column headers */}
-                        <div className="hidden md:grid grid-cols-[minmax(0,1fr)_220px_180px] items-center gap-4 px-3 pb-2 border-b border-white/[0.05] text-[12px] font-medium text-muted-foreground/70 uppercase tracking-wide">
+                        <div className="hidden md:grid grid-cols-[minmax(0,1fr)_220px_180px] items-center gap-4 px-3 pb-2 border-b border-border text-[11px] font-medium text-foreground-subtle uppercase tracking-[0.12em]">
                             <div>Name</div>
                             <div>Project</div>
-                            <div className="flex items-center justify-end gap-1">
-                                <button
-                                    onClick={() =>
-                                        setSort((cur) => (cur === 'recent' ? 'oldest' : 'recent'))
-                                    }
-                                    className="inline-flex items-center gap-1 hover:text-foreground transition-colors uppercase"
-                                >
-                                    {SORT_LABEL[sort]}
-                                    <ChevronDown className="h-3 w-3" />
-                                </button>
-                            </div>
+                            <div className="text-right">{SORT_LABEL[sort]}</div>
                         </div>
 
                         {/* List */}
-                        <div className="mt-1">
+                        <div className="mt-1 divide-y divide-border-subtle">
                             {loading ? (
-                                <div className="py-16 flex items-center justify-center">
-                                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/60" />
-                                </div>
+                                <SkeletonList />
                             ) : filtered.length === 0 ? (
-                                <EmptyState filter={filter} query={query} />
+                                <EmptyState
+                                    filter={filter}
+                                    query={query}
+                                    onNewChat={handleNewChat}
+                                />
                             ) : (
-                                <ul className="flex flex-col">
+                                <ul className="flex flex-col divide-y divide-border-subtle">
                                     {filtered.map((session) => (
                                         <ChatRow
                                             key={session.id}
@@ -399,7 +400,9 @@ export default function AllChatsPage() {
                                             onRenameCancel={handleRenameCancel}
                                             onOpen={() => handleOpenChat(session.id)}
                                             onTogglePin={() => handleTogglePin(session.id)}
-                                            onToggleArchive={() => handleToggleArchive(session.id)}
+                                            onToggleArchive={() =>
+                                                handleToggleArchive(session.id)
+                                            }
                                             onDelete={() =>
                                                 setPendingDelete({
                                                     sessionId: session.id,
@@ -415,7 +418,6 @@ export default function AllChatsPage() {
                 </div>
             </div>
 
-            {/* Search modal (triggered from sidebar) */}
             <SearchModal
                 open={isSearchModalOpen}
                 onClose={() => setIsSearchModalOpen(false)}
@@ -423,7 +425,6 @@ export default function AllChatsPage() {
                 onSelectSession={(sessionId) => handleOpenChat(sessionId)}
             />
 
-            {/* Delete confirmation */}
             <ConfirmModal
                 open={pendingDelete !== null}
                 onClose={() => setPendingDelete(null)}
@@ -442,8 +443,9 @@ export default function AllChatsPage() {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Filter dropdown (single pill button matching the screenshot)
+// Filter dropdown
 // ────────────────────────────────────────────────────────────────────────────
+
 interface FilterMenuProps {
     filter: FilterId;
     counts: { all: number; pinned: number; archived: number };
@@ -457,17 +459,38 @@ function FilterMenu({ filter, counts, onChange }: FilterMenuProps) {
     useEffect(() => {
         if (!open) return;
         const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+            if (ref.current && !ref.current.contains(e.target as Node))
+                setOpen(false);
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
     }, [open]);
 
-    const options: { id: FilterId; label: string; icon: React.ReactNode; count: number }[] = [
-        { id: 'all', label: 'All chats', icon: <Inbox className="h-3.5 w-3.5" />, count: counts.all },
-        { id: 'pinned', label: 'Pinned', icon: <Pin className="h-3.5 w-3.5 rotate-45" />, count: counts.pinned },
-        { id: 'archived', label: 'Archived', icon: <Archive className="h-3.5 w-3.5" />, count: counts.archived },
-    ];
+    const options: {
+        id: FilterId;
+        label: string;
+        icon: React.ReactNode;
+        count: number;
+    }[] = [
+            {
+                id: 'all',
+                label: 'All chats',
+                icon: <Inbox className="h-3.5 w-3.5" strokeWidth={1.5} />,
+                count: counts.all,
+            },
+            {
+                id: 'pinned',
+                label: 'Pinned',
+                icon: <Pin className="h-3.5 w-3.5" strokeWidth={1.5} />,
+                count: counts.pinned,
+            },
+            {
+                id: 'archived',
+                label: 'Archived',
+                icon: <Archive className="h-3.5 w-3.5" strokeWidth={1.5} />,
+                count: counts.archived,
+            },
+        ];
 
     const isActive = filter !== 'all';
 
@@ -476,19 +499,28 @@ function FilterMenu({ filter, counts, onChange }: FilterMenuProps) {
             <button
                 onClick={() => setOpen((o) => !o)}
                 className={cn(
-                    'inline-flex items-center gap-1.5 h-9 pl-3 pr-3 rounded-lg text-[13px] font-medium border transition-colors',
+                    'inline-flex items-center gap-1.5 h-9 pl-3 pr-3 rounded-md text-[13px] font-medium border transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                     isActive
-                        ? 'bg-white/[0.08] text-foreground border-white/[0.15]'
-                        : 'bg-white/[0.03] text-foreground border-white/[0.1] hover:bg-white/[0.06]'
+                        ? 'bg-surface-3 text-foreground border-border-strong'
+                        : 'bg-surface-2 text-foreground border-border hover:bg-surface-3'
                 )}
             >
-                <ListFilter className="h-3.5 w-3.5" />
+                <ListFilter className="h-3.5 w-3.5" strokeWidth={1.5} />
                 <span>{filter === 'all' ? 'Filter' : FILTER_LABEL[filter]}</span>
-                {isActive && <X className="h-3 w-3 ml-0.5 text-muted-foreground" onClick={(e) => { e.stopPropagation(); onChange('all'); }} />}
+                {isActive && (
+                    <X
+                        className="h-3 w-3 ml-0.5 text-foreground-muted hover:text-foreground"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onChange('all');
+                        }}
+                    />
+                )}
             </button>
 
             {open && (
-                <div className="absolute left-0 mt-1.5 min-w-[220px] z-30 bg-[#2a2a2a] border border-white/10 rounded-lg shadow-2xl py-1 overflow-hidden">
+                <div className="absolute left-0 mt-1.5 min-w-[220px] z-30 bg-popover border border-border rounded-md shadow-overlay py-1 overflow-hidden">
                     {options.map((opt) => (
                         <button
                             key={opt.id}
@@ -499,16 +531,18 @@ function FilterMenu({ filter, counts, onChange }: FilterMenuProps) {
                             className={cn(
                                 'w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] transition-colors',
                                 filter === opt.id
-                                    ? 'text-foreground bg-white/[0.06]'
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.04]'
+                                    ? 'text-foreground bg-surface-2'
+                                    : 'text-foreground-muted hover:text-foreground hover:bg-surface-2'
                             )}
                         >
-                            <span className="text-muted-foreground/80">{opt.icon}</span>
+                            <span className="text-foreground-subtle">{opt.icon}</span>
                             <span className="flex-1 text-left">{opt.label}</span>
-                            <span className="text-[11px] text-muted-foreground/70 tabular-nums">
+                            <span className="font-mono text-[11px] text-foreground-subtle tabular-nums">
                                 {opt.count}
                             </span>
-                            {filter === opt.id && <Check className="h-3.5 w-3.5 text-foreground" />}
+                            {filter === opt.id && (
+                                <Check className="h-3.5 w-3.5 text-foreground" strokeWidth={1.75} />
+                            )}
                         </button>
                     ))}
                 </div>
@@ -518,16 +552,24 @@ function FilterMenu({ filter, counts, onChange }: FilterMenuProps) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Sort menu (the "..." button to the right of the search bar)
+// Sort menu (text-labeled, not hidden behind ...)
 // ────────────────────────────────────────────────────────────────────────────
-function SortMenu({ sort, onChange }: { sort: SortId; onChange: (s: SortId) => void }) {
+
+function SortMenu({
+    sort,
+    onChange,
+}: {
+    sort: SortId;
+    onChange: (s: SortId) => void;
+}) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (!open) return;
         const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+            if (ref.current && !ref.current.contains(e.target as Node))
+                setOpen(false);
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
@@ -536,24 +578,27 @@ function SortMenu({ sort, onChange }: { sort: SortId; onChange: (s: SortId) => v
     const options: { id: SortId; label: string }[] = [
         { id: 'recent', label: 'Most recent' },
         { id: 'oldest', label: 'Oldest first' },
-        { id: 'az', label: 'Title (A-Z)' },
+        { id: 'az', label: 'Title (A–Z)' },
     ];
 
     return (
         <div className="relative" ref={ref}>
             <button
                 onClick={() => setOpen((o) => !o)}
-                className="h-10 w-10 inline-flex items-center justify-center rounded-lg bg-white/[0.03] text-muted-foreground hover:text-foreground hover:bg-white/[0.06] border border-white/[0.08] transition-colors"
-                title="Sort"
-                aria-label="Sort"
+                className={cn(
+                    'inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium transition-colors',
+                    'bg-surface-2 border border-border text-foreground hover:bg-surface-3',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+                )}
+                aria-haspopup="menu"
+                aria-expanded={open}
             >
-                <MoreHorizontal className="h-4 w-4" />
+                <span className="text-foreground-muted">Sort:</span>
+                <span>{SORT_LABEL[sort]}</span>
+                <ChevronDown className="h-3 w-3 text-foreground-muted" strokeWidth={1.5} />
             </button>
             {open && (
-                <div className="absolute right-0 mt-1.5 min-w-[170px] z-30 bg-[#2a2a2a] border border-white/10 rounded-lg shadow-2xl py-1 overflow-hidden">
-                    <p className="px-3 py-1 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wide">
-                        Sort by
-                    </p>
+                <div className="absolute right-0 mt-1.5 min-w-[180px] z-30 bg-popover border border-border rounded-md shadow-overlay py-1 overflow-hidden">
                     {options.map((opt) => (
                         <button
                             key={opt.id}
@@ -564,12 +609,14 @@ function SortMenu({ sort, onChange }: { sort: SortId; onChange: (s: SortId) => v
                             className={cn(
                                 'w-full flex items-center justify-between px-3 py-1.5 text-[13px] transition-colors',
                                 sort === opt.id
-                                    ? 'text-foreground bg-white/[0.06]'
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.04]'
+                                    ? 'text-foreground bg-surface-2'
+                                    : 'text-foreground-muted hover:text-foreground hover:bg-surface-2'
                             )}
                         >
                             <span>{opt.label}</span>
-                            {sort === opt.id && <Check className="h-3.5 w-3.5" />}
+                            {sort === opt.id && (
+                                <Check className="h-3.5 w-3.5" strokeWidth={1.75} />
+                            )}
                         </button>
                     ))}
                 </div>
@@ -579,8 +626,9 @@ function SortMenu({ sort, onChange }: { sort: SortId; onChange: (s: SortId) => v
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Chat row — three-column layout (Name | Project | Updated)
+// Chat row
 // ────────────────────────────────────────────────────────────────────────────
+
 interface ChatRowProps {
     session: ChatSession;
     user: { email?: string; user_metadata?: { full_name?: string; avatar_url?: string } } | null;
@@ -626,7 +674,8 @@ function ChatRow({
     useEffect(() => {
         if (!menuOpen) return;
         const handler = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+            if (menuRef.current && !menuRef.current.contains(e.target as Node))
+                setMenuOpen(false);
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
@@ -652,8 +701,8 @@ function ChatRow({
 
     return (
         <li className="group">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_220px_180px] items-center gap-3 md:gap-4 px-3 py-3 rounded-md hover:bg-white/[0.03] transition-colors">
-                {/* Name column */}
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_220px_180px] items-center gap-3 md:gap-4 px-3 py-3 hover:bg-surface-2 transition-colors">
+                {/* Name */}
                 <div className="min-w-0">
                     {isRenaming ? (
                         <div className="flex items-center gap-1.5">
@@ -663,61 +712,63 @@ function ChatRow({
                                 onChange={(e) => onRenameValueChange(e.target.value)}
                                 onKeyDown={handleKey}
                                 maxLength={120}
-                                className="flex-1 min-w-0 h-8 px-2 rounded-md bg-white/[0.06] border border-white/[0.15] text-[14px] text-foreground outline-none focus:border-white/[0.25]"
+                                className="flex-1 min-w-0 h-8 px-2 rounded-md bg-surface border border-border-strong text-[14px] text-foreground outline-none focus:border-ring focus:shadow-[0_0_0_1px_hsl(var(--ring))]"
                             />
                             <button
                                 onClick={onRenameSave}
-                                className="h-7 w-7 flex items-center justify-center rounded-md bg-white/[0.08] hover:bg-white/[0.12] text-foreground transition-colors"
+                                className="h-7 w-7 flex items-center justify-center rounded-md bg-foreground text-background transition-colors"
                                 aria-label="Save"
                             >
-                                <Check className="h-3.5 w-3.5" />
+                                <Check className="h-3.5 w-3.5" strokeWidth={2} />
                             </button>
                             <button
                                 onClick={onRenameCancel}
-                                className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors"
+                                className="h-7 w-7 flex items-center justify-center rounded-md text-foreground-muted hover:text-foreground hover:bg-surface-3 transition-colors"
                                 aria-label="Cancel"
                             >
-                                <X className="h-3.5 w-3.5" />
+                                <X className="h-3.5 w-3.5" strokeWidth={1.5} />
                             </button>
                         </div>
                     ) : (
-                        <button
-                            onClick={onOpen}
-                            className="block w-full text-left"
-                        >
+                        <button onClick={onOpen} className="block w-full text-left">
                             <span className="inline-flex items-center gap-1.5 max-w-full">
                                 <span className="text-[14px] text-foreground truncate">
                                     {session.title}
                                 </span>
                                 {session.isPinned && (
-                                    <Star
-                                        className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400"
+                                    <Pin
+                                        className="h-3 w-3 shrink-0 fill-foreground text-foreground"
                                         aria-label="Pinned"
+                                        strokeWidth={1.5}
                                     />
                                 )}
                             </span>
-                            {/* Mobile-only meta: project + time */}
-                            <p className="md:hidden text-[12px] text-muted-foreground/70 mt-0.5 flex items-center gap-2">
-                                <ProjectBadge label={projectLabel} archived={session.isArchived} />
-                                <span>·</span>
-                                <span>{formatRelativeTime(session.updatedAt)}</span>
+                            <p className="md:hidden text-[12px] text-foreground-muted mt-0.5 flex items-center gap-2">
+                                <ProjectBadge
+                                    label={projectLabel}
+                                    archived={session.isArchived}
+                                />
+                                <span aria-hidden>·</span>
+                                <span className="font-mono tabular-nums">
+                                    {formatRelativeTime(session.updatedAt)}
+                                </span>
                             </p>
                         </button>
                     )}
                 </div>
 
-                {/* Project column (desktop only) */}
+                {/* Project (desktop) */}
                 <div className="hidden md:flex items-center min-w-0">
                     <ProjectBadge label={projectLabel} archived={session.isArchived} />
                 </div>
 
                 {/* Updated + avatar + menu */}
                 <div className="flex items-center justify-end gap-2 md:gap-3">
-                    <span className="hidden md:inline text-[13px] text-muted-foreground tabular-nums whitespace-nowrap">
+                    <span className="hidden md:inline font-mono text-[12px] text-foreground-muted tabular-nums whitespace-nowrap">
                         {formatRelativeTime(session.updatedAt)}
                     </span>
                     <div
-                        className="hidden md:flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/[0.08] border border-white/[0.1] text-[10px] font-semibold text-foreground"
+                        className="hidden md:flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 border border-border text-[10px] font-semibold text-foreground"
                         aria-hidden="true"
                     >
                         {initial}
@@ -731,22 +782,23 @@ function ChatRow({
                             }}
                             className={cn(
                                 'h-7 w-7 flex items-center justify-center rounded-md transition-colors',
+                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                                 menuOpen
-                                    ? 'bg-white/[0.1] text-foreground opacity-100'
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.06] md:opacity-0 md:group-hover:opacity-100'
+                                    ? 'bg-surface-3 text-foreground opacity-100'
+                                    : 'text-foreground-muted hover:text-foreground hover:bg-surface-3 md:opacity-0 md:group-hover:opacity-100'
                             )}
                             aria-label="More actions"
                         >
-                            <MoreHorizontal className="h-4 w-4" />
+                            <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} />
                         </button>
                         {menuOpen && (
-                            <div className="absolute right-0 top-full mt-1 min-w-[180px] z-30 bg-[#2a2a2a] border border-white/10 rounded-lg shadow-2xl py-1 overflow-hidden">
+                            <div className="absolute right-0 top-full mt-1 min-w-[180px] z-30 bg-popover border border-border rounded-md shadow-overlay py-1 overflow-hidden">
                                 <MenuItem
                                     onClick={() => {
                                         onTogglePin();
                                         setMenuOpen(false);
                                     }}
-                                    icon={<Pin className="h-3.5 w-3.5 rotate-45" />}
+                                    icon={<Pin className="h-3.5 w-3.5" strokeWidth={1.5} />}
                                     label={session.isPinned ? 'Unpin' : 'Pin'}
                                 />
                                 <MenuItem
@@ -754,7 +806,7 @@ function ChatRow({
                                         onRenameStart();
                                         setMenuOpen(false);
                                     }}
-                                    icon={<Pencil className="h-3.5 w-3.5" />}
+                                    icon={<Pencil className="h-3.5 w-3.5" strokeWidth={1.5} />}
                                     label="Rename"
                                 />
                                 <MenuItem
@@ -764,20 +816,20 @@ function ChatRow({
                                     }}
                                     icon={
                                         session.isArchived ? (
-                                            <ArchiveRestore className="h-3.5 w-3.5" />
+                                            <ArchiveRestore className="h-3.5 w-3.5" strokeWidth={1.5} />
                                         ) : (
-                                            <Archive className="h-3.5 w-3.5" />
+                                            <Archive className="h-3.5 w-3.5" strokeWidth={1.5} />
                                         )
                                     }
                                     label={session.isArchived ? 'Unarchive' : 'Archive'}
                                 />
-                                <div className="my-1 h-px bg-white/[0.08]" />
+                                <div className="my-1 h-px bg-border-subtle" />
                                 <MenuItem
                                     onClick={() => {
                                         onDelete();
                                         setMenuOpen(false);
                                     }}
-                                    icon={<Trash2 className="h-3.5 w-3.5" />}
+                                    icon={<Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />}
                                     label="Delete"
                                     danger
                                 />
@@ -790,17 +842,22 @@ function ChatRow({
     );
 }
 
-function ProjectBadge({ label, archived }: { label: string; archived: boolean }) {
+function ProjectBadge({
+    label,
+    archived,
+}: {
+    label: string;
+    archived: boolean;
+}) {
     return (
-        <span className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground min-w-0">
-            {archived ? (
-                <CircleDashed className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
-            ) : (
-                <Triangle
-                    className="h-3 w-3 shrink-0 fill-blue-400/80 text-blue-400/80"
-                    aria-hidden="true"
-                />
-            )}
+        <span className="inline-flex items-center gap-2 text-[13px] text-foreground-muted min-w-0">
+            <span
+                aria-hidden
+                className={cn(
+                    'h-1.5 w-1.5 rounded-full shrink-0',
+                    archived ? 'bg-foreground-subtle' : 'bg-brand'
+                )}
+            />
             <span className="truncate">{label}</span>
         </span>
     );
@@ -823,8 +880,8 @@ function MenuItem({
             className={cn(
                 'w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] transition-colors',
                 danger
-                    ? 'text-red-400 hover:bg-red-500/10'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.05]'
+                    ? 'text-destructive hover:bg-destructive/10'
+                    : 'text-foreground-muted hover:text-foreground hover:bg-surface-2'
             )}
         >
             {icon}
@@ -834,9 +891,18 @@ function MenuItem({
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Empty state
+// Empty + skeleton states
 // ────────────────────────────────────────────────────────────────────────────
-function EmptyState({ filter, query }: { filter: FilterId; query: string }) {
+
+function EmptyState({
+    filter,
+    query,
+    onNewChat,
+}: {
+    filter: FilterId;
+    query: string;
+    onNewChat: () => void;
+}) {
     let title = 'No chats yet';
     let subtitle = 'Start a new conversation to see it appear here.';
 
@@ -851,13 +917,39 @@ function EmptyState({ filter, query }: { filter: FilterId; query: string }) {
         subtitle = 'Archive chats to hide them from your sidebar without deleting them.';
     }
 
+    const showCta = !query && filter !== 'archived';
+
     return (
         <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-            <div className="h-12 w-12 rounded-full bg-white/[0.04] border border-white/[0.06] flex items-center justify-center mb-3">
-                <Inbox className="h-5 w-5 text-muted-foreground/60" />
+            <div className="h-11 w-11 rounded-md bg-surface-2 border border-border flex items-center justify-center mb-4">
+                <Inbox className="h-5 w-5 text-foreground-subtle" strokeWidth={1.5} />
             </div>
-            <p className="text-[14px] font-medium text-foreground">{title}</p>
-            <p className="text-[12.5px] text-muted-foreground/70 mt-1 max-w-xs">{subtitle}</p>
+            <p className="text-[15px] font-medium text-foreground">{title}</p>
+            <p className="text-[13px] text-foreground-muted mt-1.5 max-w-xs leading-relaxed">
+                {subtitle}
+            </p>
+            {showCta && (
+                <Button onClick={onNewChat} size="default" className="mt-5">
+                    <Plus className="h-4 w-4" strokeWidth={1.75} />
+                    Start a new chat
+                </Button>
+            )}
         </div>
+    );
+}
+
+function SkeletonList() {
+    return (
+        <ul className="flex flex-col divide-y divide-border-subtle" aria-hidden>
+            {Array.from({ length: 5 }).map((_, i) => (
+                <li key={i} className="px-3 py-3.5">
+                    <div className="grid grid-cols-[minmax(0,1fr)_220px_180px] items-center gap-4">
+                        <div className="h-3.5 rounded bg-surface-2 animate-pulse" style={{ width: `${60 + (i * 7) % 30}%` }} />
+                        <div className="h-3 w-24 rounded bg-surface-2 animate-pulse" />
+                        <div className="ml-auto h-3 w-20 rounded bg-surface-2 animate-pulse" />
+                    </div>
+                </li>
+            ))}
+        </ul>
     );
 }

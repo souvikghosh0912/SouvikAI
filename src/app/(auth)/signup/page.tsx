@@ -3,43 +3,43 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import {
-    Button, Input, Label,
-    Card, CardHeader, CardTitle, CardDescription,
-    CardContent, CardFooter,
-} from '@/components/ui';
+import { Button, Input, Label } from '@/components/ui';
+import { AuthHeader } from '@/components/auth/AuthHeader';
+import { OAuthButton } from '@/components/auth/OAuthButton';
+import { Divider } from '@/components/auth/Divider';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 
 const SESSION_PASSWORD_KEY = 'pending_signup_password';
 
 /**
- * Sign-up page — new Twilio Verify flow.
+ * Sign-up page — Twilio Verify flow.
  *
- * 1. User fills in email + password + confirm password.
- * 2. On submit: POST /api/auth/send-verification (email only).
- * 3. Password is stored in sessionStorage (client-side only, never sent to server here).
- * 4. On success: redirect to /verify-email?email=...
+ * 1. User fills email + password + confirm password.
+ * 2. POST /api/auth/send-verification (email only).
+ * 3. Password is stashed in sessionStorage (never sent to server here).
+ * 4. Redirects to /verify-email?email=...
  */
 export default function SignUpPage() {
     const router = useRouter();
-
-    const [email, setEmail]                     = useState('');
-    const [password, setPassword]               = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [error, setError]                     = useState('');
-    const [isLoading, setIsLoading]             = useState(false);
-    const [showPassword, setShowPassword]       = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const { signInWithGoogle } = useAuth();
 
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [isOAuthLoading, setIsOAuthLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
     const handleGoogleSignIn = async () => {
-        setIsLoading(true);
+        setIsOAuthLoading(true);
         setError('');
         const { error } = await signInWithGoogle();
         if (error) {
             setError(error);
-            setIsLoading(false);
+            setIsOAuthLoading(false);
         }
     };
 
@@ -57,168 +57,168 @@ export default function SignUpPage() {
         }
 
         setIsLoading(true);
-
         try {
             const res = await fetch('/api/auth/send-verification', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: email.toLowerCase().trim() }),
             });
-
             const data = await res.json();
 
             if (!res.ok) {
-                setError(data.error ?? 'Failed to send verification code. Please try again.');
+                setError(
+                    data.error ?? 'Failed to send verification code. Please try again.'
+                );
                 return;
             }
 
-            // Store the password client-side so the verify page can complete sign-up
             sessionStorage.setItem(SESSION_PASSWORD_KEY, password);
-
-            router.push(`/verify-email?email=${encodeURIComponent(email.toLowerCase().trim())}`);
+            router.push(
+                `/verify-email?email=${encodeURIComponent(email.toLowerCase().trim())}`
+            );
         } finally {
             setIsLoading(false);
         }
     };
 
+    const busy = isLoading || isOAuthLoading;
+
     return (
-        <Card className="glass-card border-0">
-            <CardHeader className="text-center space-y-2">
-                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-6 h-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"
-                        />
-                    </svg>
+        <div>
+            <AuthHeader
+                title="Create your account"
+                description="We'll send a verification code to your email."
+            />
+
+            <OAuthButton
+                provider="google"
+                loading={isOAuthLoading}
+                disabled={busy}
+                onClick={handleGoogleSignIn}
+            />
+
+            <div className="my-6">
+                <Divider>Or sign up with email</Divider>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                    <div
+                        role="alert"
+                        className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-[13px] text-destructive animate-slide-up"
+                    >
+                        {error}
+                    </div>
+                )}
+
+                <div className="space-y-1.5">
+                    <Label htmlFor="email" className="text-[13px] font-medium">
+                        Email
+                    </Label>
+                    <Input
+                        id="email"
+                        type="email"
+                        placeholder="name@example.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        disabled={busy}
+                        autoComplete="email"
+                    />
                 </div>
-                <CardTitle className="text-3xl font-bold tracking-tight">Create account</CardTitle>
-                <CardDescription className="text-base">
-                    We&apos;ll send a verification code to your email
-                </CardDescription>
-            </CardHeader>
 
-            <form onSubmit={handleSubmit}>
-                <CardContent className="space-y-4">
-                    {error && (
-                        <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md animate-slide-up">
-                            {error}
-                        </div>
-                    )}
-
-                    <div className="space-y-2">
-                        <Label htmlFor="email">Email</Label>
+                <div className="space-y-1.5">
+                    <Label htmlFor="password" className="text-[13px] font-medium">
+                        Password
+                    </Label>
+                    <div className="relative">
                         <Input
-                            id="email"
-                            type="email"
-                            placeholder="name@example.com"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            id="password"
+                            type={showPassword ? 'text' : 'password'}
+                            placeholder="At least 8 characters"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
                             required
-                            disabled={isLoading}
-                            className="bg-background/50 border-input/50 focus:bg-background transition-colors"
+                            disabled={busy}
+                            autoComplete="new-password"
+                            className="pr-10"
                         />
+                        <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={() => setShowPassword((v) => !v)}
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-sm text-foreground-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                            {showPassword ? (
+                                <EyeOff className="h-4 w-4" strokeWidth={1.5} />
+                            ) : (
+                                <Eye className="h-4 w-4" strokeWidth={1.5} />
+                            )}
+                        </button>
                     </div>
+                </div>
 
-                    <div className="space-y-2">
-                        <Label htmlFor="password">Password</Label>
-                        <div className="relative">
-                            <Input
-                                id="password"
-                                type={showPassword ? "text" : "password"}
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                disabled={isLoading}
-                                className="bg-background/50 border-input/50 focus:bg-background transition-colors pr-10"
-                            />
-                            <button
-                                type="button"
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                                onClick={() => setShowPassword(!showPassword)}
-                                tabIndex={-1}
-                            >
-                                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </button>
-                        </div>
+                <div className="space-y-1.5">
+                    <Label htmlFor="confirmPassword" className="text-[13px] font-medium">
+                        Confirm password
+                    </Label>
+                    <div className="relative">
+                        <Input
+                            id="confirmPassword"
+                            type={showConfirmPassword ? 'text' : 'password'}
+                            placeholder="Re-enter your password"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            required
+                            disabled={busy}
+                            autoComplete="new-password"
+                            className="pr-10"
+                        />
+                        <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={() => setShowConfirmPassword((v) => !v)}
+                            aria-label={
+                                showConfirmPassword ? 'Hide password' : 'Show password'
+                            }
+                            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-sm text-foreground-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                            {showConfirmPassword ? (
+                                <EyeOff className="h-4 w-4" strokeWidth={1.5} />
+                            ) : (
+                                <Eye className="h-4 w-4" strokeWidth={1.5} />
+                            )}
+                        </button>
                     </div>
+                </div>
 
-                    <div className="space-y-2">
-                        <Label htmlFor="confirmPassword">Confirm password</Label>
-                        <div className="relative">
-                            <Input
-                                id="confirmPassword"
-                                type={showConfirmPassword ? "text" : "password"}
-                                placeholder="••••••••"
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
-                                required
-                                disabled={isLoading}
-                                className="bg-background/50 border-input/50 focus:bg-background transition-colors pr-10"
-                            />
-                            <button
-                                type="button"
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                tabIndex={-1}
-                            >
-                                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </button>
-                        </div>
-                    </div>
-                </CardContent>
-
-                <CardFooter className="flex flex-col gap-4">
-                    <Button
-                        type="submit"
-                        className="w-full h-11 text-base shadow-lg hover:shadow-xl transition-all duration-300"
-                        disabled={isLoading}
-                    >
-                        {isLoading ? (
-                            <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Sending code…
-                            </>
-                        ) : (
-                            'Continue'
-                        )}
-                    </Button>
-
-                    <div className="relative w-full">
-                        <div className="absolute inset-0 flex items-center">
-                            <span className="w-full border-t" />
-                        </div>
-                        <div className="relative flex justify-center text-xs uppercase">
-                            <span className="bg-card px-2 text-muted-foreground">
-                                Or continue with
-                            </span>
-                        </div>
-                    </div>
-
-                    <Button 
-                        type="button" 
-                        variant="outline" 
-                        className="w-full h-11 text-base shadow-sm hover:shadow-md transition-all duration-300" 
-                        onClick={handleGoogleSignIn}
-                        disabled={isLoading}
-                    >
-                        <svg className="mr-2 h-4 w-4" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="google" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
-                            <path fill="currentColor" d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"></path>
-                        </svg>
-                        Google
-                    </Button>
-
-                    <div className="text-center text-sm text-muted-foreground">
-                        Already have an account?{' '}
-                        <Link href="/signin" className="text-primary font-medium hover:underline underline-offset-4">
-                            Sign in
-                        </Link>
-                    </div>
-                </CardFooter>
+                <Button
+                    type="submit"
+                    size="lg"
+                    className="w-full mt-2"
+                    disabled={busy || !email || !password || !confirmPassword}
+                >
+                    {isLoading ? (
+                        <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Sending code
+                        </>
+                    ) : (
+                        'Continue'
+                    )}
+                </Button>
             </form>
-        </Card>
+
+            <p className="mt-6 text-center text-[13px] text-foreground-muted">
+                Already have an account?{' '}
+                <Link
+                    href="/signin"
+                    className="font-medium text-foreground underline-offset-4 hover:underline"
+                >
+                    Sign in
+                </Link>
+            </p>
+        </div>
     );
 }

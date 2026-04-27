@@ -4,8 +4,9 @@
 import { useAuth } from '@/hooks/useAuth';
 import { useState, useEffect } from 'react';
 import { Input, Button } from '@/components/ui';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import { Loader2, CheckCircle2, Copy, Check } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { SectionLabel, SettingsCard, SettingRow } from '../primitives';
 
 export function AccountTab() {
     const { user, isLoading } = useAuth();
@@ -16,14 +17,16 @@ export function AccountTab() {
     const [isSendingReset, setIsSendingReset] = useState(false);
     const [resetSent, setResetSent] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
 
     const supabase = createClient();
 
     useEffect(() => {
         const fetchUserData = async () => {
             if (user) {
-                // Fetch the user's raw user metadata to grab the preset display_name
-                const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+                const {
+                    data: { user: supabaseUser },
+                } = await supabase.auth.getUser();
                 if (supabaseUser?.user_metadata?.display_name) {
                     setName(supabaseUser.user_metadata.display_name);
                 } else {
@@ -38,12 +41,10 @@ export function AccountTab() {
         setIsSavingName(true);
         setNameSaved(false);
         setError(null);
-
         try {
             const { error: updateError } = await supabase.auth.updateUser({
-                data: { display_name: name.trim() }
+                data: { display_name: name.trim() },
             });
-
             if (updateError) throw updateError;
             setNameSaved(true);
             setTimeout(() => setNameSaved(false), 3000);
@@ -58,16 +59,13 @@ export function AccountTab() {
         setIsSendingReset(true);
         setResetSent(false);
         setError(null);
-
         try {
             const response = await fetch('/api/settings/password-reset', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
             });
-
             const result = await response.json();
             if (!response.ok) throw new Error(result.error);
-
             setResetSent(true);
             setTimeout(() => setResetSent(false), 5000);
         } catch (err: any) {
@@ -77,69 +75,129 @@ export function AccountTab() {
         }
     };
 
+    const handleCopyEmail = async () => {
+        if (!user) return;
+        await navigator.clipboard.writeText(user.email);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
     if (isLoading || !user) {
         return (
             <div className="flex h-40 items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <Loader2 className="h-5 w-5 animate-spin text-foreground-muted" />
             </div>
         );
     }
 
     return (
-        <div className="space-y-5 pb-3">
+        <div className="space-y-1 animate-in fade-in slide-in-from-bottom-1 duration-200 pb-4">
             {error && (
-                <div className="p-2.5 bg-red-500/10 border border-red-500/20 text-red-500 text-[12px] rounded-md">
+                <div
+                    role="alert"
+                    className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-[13px] text-destructive"
+                >
                     {error}
                 </div>
             )}
 
-            {/* Profile Section */}
-            <div className="space-y-2.5">
-                <h3 className="text-[13px] font-semibold text-foreground">Profile</h3>
-                <div className="space-y-2.5 max-w-sm">
-                    <div className="space-y-1">
-                        <label className="text-[12px] font-medium text-foreground">Email</label>
-                        <Input value={user.email} disabled className="bg-white/5 h-8 text-[12px]" />
-                        <p className="text-[10.5px] text-muted-foreground">Your email address cannot be changed.</p>
-                    </div>
+            {/* Profile */}
+            <SectionLabel>Profile</SectionLabel>
+            <SettingsCard>
+                <SettingRow
+                    label="Email"
+                    description="Your email address cannot be changed."
+                    control={
+                        <button
+                            type="button"
+                            onClick={handleCopyEmail}
+                            className="flex items-center gap-2 h-8 pl-3 pr-2 rounded-md bg-surface-2 border border-border text-[12px] text-foreground hover:bg-surface-3 transition-colors max-w-[260px]"
+                            aria-label="Copy email"
+                        >
+                            <span className="truncate font-mono">{user.email}</span>
+                            <span className="flex h-5 w-5 items-center justify-center text-foreground-muted shrink-0">
+                                {copied ? (
+                                    <Check className="h-3 w-3 text-success" />
+                                ) : (
+                                    <Copy className="h-3 w-3" strokeWidth={1.5} />
+                                )}
+                            </span>
+                        </button>
+                    }
+                />
+                <SettingRow
+                    stacked
+                    label="Display name"
+                    description="The name shown across your conversations and account."
+                    control={
+                        <div className="flex items-center gap-2 max-w-sm">
+                            <Input
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                placeholder="e.g. John Doe"
+                                className="h-8 text-[13px]"
+                            />
+                            <Button
+                                size="sm"
+                                onClick={handleSaveName}
+                                disabled={isSavingName || !name.trim()}
+                                className="shrink-0"
+                            >
+                                {isSavingName ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : nameSaved ? (
+                                    <>
+                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                        Saved
+                                    </>
+                                ) : (
+                                    'Save'
+                                )}
+                            </Button>
+                        </div>
+                    }
+                />
+            </SettingsCard>
 
-                    <div className="space-y-1">
-                        <label className="text-[12px] font-medium text-foreground">Display Name</label>
-                        <Input
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="e.g. John Doe"
-                            className="bg-transparent h-8 text-[12px]"
-                        />
-                    </div>
-                </div>
-                <Button
-                    onClick={handleSaveName}
-                    disabled={isSavingName || !name.trim()}
-                    className="mt-2 h-7 px-3 text-[11px] gap-1.5"
-                >
-                    {isSavingName && <Loader2 className="h-3 w-3 animate-spin" />}
-                    {nameSaved ? <><CheckCircle2 className="h-3 w-3" /> Saved</> : 'Save Display Name'}
-                </Button>
-            </div>
-
-            {/* Security Section */}
-            <div className="pt-4 border-t border-border space-y-2.5">
-                <h3 className="text-[13px] font-semibold text-red-500">Security</h3>
-                <div className="max-w-sm text-[11.5px] text-muted-foreground leading-snug">
-                    <p>To change your password, we need to verify your identity. Click the button below and we will send a secure password reset link to <strong className="text-foreground">{user.email}</strong> via Twilio.</p>
-                </div>
-
-                <Button
-                    variant="destructive"
-                    onClick={handleSendPasswordReset}
-                    disabled={isSendingReset || resetSent}
-                    className="mt-2 h-7 px-3 text-[11px] gap-1.5"
-                >
-                    {isSendingReset && <Loader2 className="h-3 w-3 animate-spin" />}
-                    {resetSent ? <><CheckCircle2 className="h-3 w-3" /> Reset Email Dispatched</> : 'Request Password Reset'}
-                </Button>
-            </div>
+            {/* Security */}
+            <SectionLabel>Security</SectionLabel>
+            <SettingsCard>
+                <SettingRow
+                    stacked
+                    label="Password reset"
+                    description={
+                        <>
+                            We&apos;ll send a secure reset link to{' '}
+                            <span className="font-medium text-foreground">
+                                {user.email}
+                            </span>
+                            . The link expires after 30 minutes.
+                        </>
+                    }
+                    control={
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={handleSendPasswordReset}
+                            disabled={isSendingReset || resetSent}
+                        >
+                            {isSendingReset ? (
+                                <>
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    Sending
+                                </>
+                            ) : resetSent ? (
+                                <>
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    Reset email sent
+                                </>
+                            ) : (
+                                'Request password reset'
+                            )}
+                        </Button>
+                    }
+                />
+            </SettingsCard>
         </div>
     );
 }

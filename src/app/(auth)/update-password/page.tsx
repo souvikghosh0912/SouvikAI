@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Input, Label, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui';
+import { Button, Input, Label } from '@/components/ui';
+import { AuthHeader } from '@/components/auth/AuthHeader';
 import { Loader2, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -18,42 +19,30 @@ export default function UpdatePasswordPage() {
     const router = useRouter();
     const supabase = createClient();
 
-    useEffect(() => {
-        // Option 1: Handle checking hash fragment or session
-        // supabase.auth.onAuthStateChange handles the `#access_token` automatically
-        // so if they're here, they should have a session.
-    }, []);
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
 
         if (password !== confirmPassword) {
-            setError('Passwords do not match');
+            setError('Passwords do not match.');
             return;
         }
-
-        if (password.length < 6) {
-            setError('Password must be at least 6 characters');
+        if (password.length < 8) {
+            setError('Password must be at least 8 characters.');
             return;
         }
 
         setIsLoading(true);
-
         try {
             const { error: updateError } = await supabase.auth.updateUser({
-                password: password
+                password,
             });
-
             if (updateError) throw updateError;
 
             setIsSuccess(true);
-            setTimeout(() => {
-                router.push('/');
-            }, 3000);
-
+            setTimeout(() => router.push('/'), 2500);
         } catch (err: any) {
-            setError(err.message || 'Failed to update password');
+            setError(err.message || 'Failed to update password.');
         } finally {
             setIsLoading(false);
         }
@@ -61,114 +50,123 @@ export default function UpdatePasswordPage() {
 
     if (isSuccess) {
         return (
-            <Card className="glass-card border-0">
-                <CardHeader className="text-center space-y-4">
-                    <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-2">
-                        <CheckCircle2 className="w-10 h-10 text-green-500" />
-                    </div>
-                    <CardTitle className="text-3xl font-bold tracking-tight">Password Updated</CardTitle>
-                    <CardDescription className="text-base">
-                        Your password has been successfully reset. Redirecting you...
-                    </CardDescription>
-                </CardHeader>
-            </Card>
+            <div className="text-left">
+                <div className="flex items-center gap-2.5 mb-3">
+                    <CheckCircle2 className="h-5 w-5 text-success" strokeWidth={1.75} />
+                    <h1 className="text-[22px] font-semibold tracking-tight">
+                        Password updated
+                    </h1>
+                </div>
+                <p className="text-[14px] text-foreground-muted leading-relaxed">
+                    Your password has been changed. Redirecting you to your workspace
+                    now&hellip;
+                </p>
+            </div>
         );
     }
 
     return (
-        <Card className="glass-card border-0">
-            <CardHeader className="text-center space-y-2">
-                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
-                    <svg
-                        className="w-6 h-6 text-primary"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
+        <div>
+            <AuthHeader
+                title="Set a new password"
+                description="Choose a strong password you don't use anywhere else."
+            />
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                    <div
+                        role="alert"
+                        className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-[13px] text-destructive animate-slide-up"
                     >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                        {error}
+                    </div>
+                )}
+
+                <div className="space-y-1.5">
+                    <Label htmlFor="password" className="text-[13px] font-medium">
+                        New password
+                    </Label>
+                    <div className="relative">
+                        <Input
+                            id="password"
+                            type={showPassword ? 'text' : 'password'}
+                            placeholder="At least 8 characters"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                            disabled={isLoading}
+                            autoComplete="new-password"
+                            className="pr-10"
                         />
-                    </svg>
+                        <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={() => setShowPassword((v) => !v)}
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-sm text-foreground-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                            {showPassword ? (
+                                <EyeOff className="h-4 w-4" strokeWidth={1.5} />
+                            ) : (
+                                <Eye className="h-4 w-4" strokeWidth={1.5} />
+                            )}
+                        </button>
+                    </div>
                 </div>
-                <CardTitle className="text-3xl font-bold tracking-tight">Update Password</CardTitle>
-                <CardDescription className="text-base">
-                    Please enter your new password below.
-                </CardDescription>
-            </CardHeader>
-            <form onSubmit={handleSubmit}>
-                <CardContent className="space-y-4">
-                    {error && (
-                        <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md animate-slide-up">
-                            {error}
-                        </div>
-                    )}
-                    <div className="space-y-2">
-                        <Label htmlFor="password">New Password</Label>
-                        <div className="relative">
-                            <Input
-                                id="password"
-                                type={showPassword ? "text" : "password"}
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                disabled={isLoading}
-                                className="bg-background/50 border-input/50 focus:bg-background transition-colors pr-10"
-                            />
-                            <button
-                                type="button"
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                                onClick={() => setShowPassword(!showPassword)}
-                                tabIndex={-1}
-                            >
-                                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </button>
-                        </div>
-                    </div>
-                    <div className="space-y-2">
-                        <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                        <div className="relative">
-                            <Input
-                                id="confirmPassword"
-                                type={showConfirmPassword ? "text" : "password"}
-                                placeholder="••••••••"
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
-                                required
-                                disabled={isLoading}
-                                className="bg-background/50 border-input/50 focus:bg-background transition-colors pr-10"
-                            />
-                            <button
-                                type="button"
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                tabIndex={-1}
-                            >
-                                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </button>
-                        </div>
-                    </div>
-                </CardContent>
-                <CardFooter>
-                    <Button
-                        type="submit"
-                        className="w-full h-11 text-base shadow-lg hover:shadow-xl transition-all duration-300"
-                        disabled={isLoading || !password || !confirmPassword}
+
+                <div className="space-y-1.5">
+                    <Label
+                        htmlFor="confirmPassword"
+                        className="text-[13px] font-medium"
                     >
-                        {isLoading ? (
-                            <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Updating...
-                            </>
-                        ) : (
-                            'Update Password'
-                        )}
-                    </Button>
-                </CardFooter>
+                        Confirm new password
+                    </Label>
+                    <div className="relative">
+                        <Input
+                            id="confirmPassword"
+                            type={showConfirmPassword ? 'text' : 'password'}
+                            placeholder="Re-enter your password"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            required
+                            disabled={isLoading}
+                            autoComplete="new-password"
+                            className="pr-10"
+                        />
+                        <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={() => setShowConfirmPassword((v) => !v)}
+                            aria-label={
+                                showConfirmPassword ? 'Hide password' : 'Show password'
+                            }
+                            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-sm text-foreground-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                            {showConfirmPassword ? (
+                                <EyeOff className="h-4 w-4" strokeWidth={1.5} />
+                            ) : (
+                                <Eye className="h-4 w-4" strokeWidth={1.5} />
+                            )}
+                        </button>
+                    </div>
+                </div>
+
+                <Button
+                    type="submit"
+                    size="lg"
+                    className="w-full mt-2"
+                    disabled={isLoading || !password || !confirmPassword}
+                >
+                    {isLoading ? (
+                        <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Updating
+                        </>
+                    ) : (
+                        'Update password'
+                    )}
+                </Button>
             </form>
-        </Card>
+        </div>
     );
 }

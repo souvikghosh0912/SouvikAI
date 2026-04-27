@@ -1,114 +1,34 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useChatPreferences } from '@/hooks/useChatPreferences';
-import type { ToneStyle, CharacteristicLevel } from '@/hooks/useChatPreferences';
+import type {
+    ToneStyle,
+    CharacteristicLevel,
+} from '@/hooks/useChatPreferences';
 import { Textarea, Button } from '@/components/ui';
-import { Loader2, Check, ChevronDown } from 'lucide-react';
+import { Loader2, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-// ─── Inline dropdown (plain text + chevron, matches screenshot exactly) ───────
-
-function InlineSelect<T extends string>({
-    value,
-    options,
-    onValueChange,
-}: {
-    value: T;
-    options: { value: T; label: string }[];
-    onValueChange: (v: T) => void;
-}) {
-    const [open, setOpen] = useState(false);
-    const ref = useRef<HTMLDivElement>(null);
-    const label = options.find(o => o.value === value)?.label ?? value;
-    const isNonDefault = value !== 'default';
-
-    const close = useCallback(() => setOpen(false), []);
-
-    useEffect(() => {
-        if (!open) return;
-        const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) close();
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [open, close]);
-
-    return (
-        <div ref={ref} className="relative">
-            <button
-                type="button"
-                onClick={() => setOpen(o => !o)}
-                className={cn(
-                    'flex items-center gap-1 px-2 py-0.5 rounded-md text-[12px] font-normal transition-colors',
-                    isNonDefault
-                        ? 'bg-white/10 text-foreground hover:bg-white/15'
-                        : 'text-foreground hover:bg-white/5',
-                )}
-            >
-                <span>{label}</span>
-                <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            </button>
-
-            {open && (
-                <div className="absolute right-0 top-full mt-1 z-50 min-w-[110px] bg-[#2a2a2a] border border-white/10 rounded-md shadow-xl overflow-hidden py-1">
-                    {options.map(opt => (
-                        <button
-                            key={opt.value}
-                            type="button"
-                            onClick={() => { onValueChange(opt.value); setOpen(false); }}
-                            className={cn(
-                                'w-full text-left px-2.5 py-1.5 text-[12px] transition-colors',
-                                opt.value === value
-                                    ? 'text-foreground bg-white/10'
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5',
-                            )}
-                        >
-                            {opt.label}
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-// ─── Option sets ──────────────────────────────────────────────────────────────
+import {
+    InlineSelect,
+    SectionLabel,
+    SettingsCard,
+    SettingRow,
+} from '../primitives';
 
 const TONE_OPTIONS: { value: ToneStyle; label: string }[] = [
-    { value: 'default',   label: 'Default'   },
-    { value: 'formal',    label: 'Formal'    },
-    { value: 'casual',    label: 'Casual'    },
+    { value: 'default', label: 'Default' },
+    { value: 'formal', label: 'Formal' },
+    { value: 'casual', label: 'Casual' },
     { value: 'technical', label: 'Technical' },
-    { value: 'friendly',  label: 'Friendly'  },
+    { value: 'friendly', label: 'Friendly' },
 ];
 
 const LEVEL_OPTIONS: { value: CharacteristicLevel; label: string }[] = [
-    { value: 'less',    label: 'Less'    },
+    { value: 'less', label: 'Less' },
     { value: 'default', label: 'Default' },
-    { value: 'more',    label: 'More'    },
+    { value: 'more', label: 'More' },
 ];
-
-// ─── Row (flat, no card border — separator via border-b) ──────────────────────
-
-function Row({
-    label,
-    control,
-    className,
-}: {
-    label: string;
-    control: React.ReactNode;
-    className?: string;
-}) {
-    return (
-        <div className={cn('flex items-center justify-between py-2', className)}>
-            <span className="text-[13px] text-foreground">{label}</span>
-            {control}
-        </div>
-    );
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
 
 export function PersonalizationTab() {
     const { preferences, updatePreference, isLoaded } = useChatPreferences();
@@ -123,7 +43,7 @@ export function PersonalizationTab() {
     if (!isLoaded) {
         return (
             <div className="flex h-40 items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <Loader2 className="h-5 w-5 animate-spin text-foreground-muted" />
             </div>
         );
     }
@@ -150,38 +70,31 @@ export function PersonalizationTab() {
         }
     };
 
-    return (
-        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 pb-3">
+    const charCount = localPrompt.length;
+    const overLimit = charCount > 2000;
 
-            {/* Base style and tone */}
-            <div className="pb-2 border-b border-border/30">
-                <div className="flex items-start justify-between gap-3 py-0.5">
-                    <div className="min-w-0">
-                        <p className="text-[13px] text-foreground">Base style and tone</p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                            Set the style and tone of how the AI responds to you. This doesn&apos;t impact the AI&apos;s capabilities.
-                        </p>
-                    </div>
-                    <div className="shrink-0 pt-0.5">
+    return (
+        <div className="space-y-1 animate-in fade-in slide-in-from-bottom-1 duration-200 pb-4">
+            {/* Tone */}
+            <SectionLabel>Style</SectionLabel>
+            <SettingsCard>
+                <SettingRow
+                    label="Base tone"
+                    description="Set how the AI sounds when responding. Doesn't change capabilities."
+                    control={
                         <InlineSelect<ToneStyle>
                             value={preferences.toneStyle}
                             options={TONE_OPTIONS}
                             onValueChange={(v) => updatePreference('toneStyle', v)}
                         />
-                    </div>
-                </div>
-            </div>
+                    }
+                />
+            </SettingsCard>
 
             {/* Characteristics */}
-            <div className="pt-3 pb-0.5">
-                <p className="text-[13px] font-semibold text-foreground">Characteristics</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                    Choose additional customizations on top of your base style and tone.
-                </p>
-            </div>
-
-            <div className="divide-y divide-border/30">
-                <Row
+            <SectionLabel>Characteristics</SectionLabel>
+            <SettingsCard>
+                <SettingRow
                     label="Warm"
                     control={
                         <InlineSelect<CharacteristicLevel>
@@ -191,7 +104,7 @@ export function PersonalizationTab() {
                         />
                     }
                 />
-                <Row
+                <SettingRow
                     label="Enthusiastic"
                     control={
                         <InlineSelect<CharacteristicLevel>
@@ -201,17 +114,19 @@ export function PersonalizationTab() {
                         />
                     }
                 />
-                <Row
-                    label="Headers & Lists"
+                <SettingRow
+                    label="Headers & lists"
                     control={
                         <InlineSelect<CharacteristicLevel>
                             value={preferences.headersAndLists}
                             options={LEVEL_OPTIONS}
-                            onValueChange={(v) => updatePreference('headersAndLists', v)}
+                            onValueChange={(v) =>
+                                updatePreference('headersAndLists', v)
+                            }
                         />
                     }
                 />
-                <Row
+                <SettingRow
                     label="Emoji"
                     control={
                         <InlineSelect<CharacteristicLevel>
@@ -221,35 +136,59 @@ export function PersonalizationTab() {
                         />
                     }
                 />
-            </div>
+            </SettingsCard>
 
             {/* Custom instructions */}
-            <div className="pt-3 border-t border-border/30 mt-1 space-y-2">
-                <p className="text-[13px] text-foreground">Custom instructions</p>
-                <Textarea
-                    value={localPrompt}
-                    onChange={(e) => setLocalPrompt(e.target.value)}
-                    placeholder="e.g. I'm a senior TypeScript engineer. Keep responses concise and production-ready."
-                    className="min-h-[88px] bg-transparent border-border/40 hover:border-border/70 focus:border-primary text-[12px] resize-y p-2.5 rounded-md"
-                />
-                <div className="flex items-center justify-between">
-                    <p className="text-[10px] text-muted-foreground/60">
-                        {localPrompt.length} / 2,000
-                    </p>
-                    <Button
-                        onClick={handleSave}
-                        disabled={isSaving || localPrompt === preferences.systemPrompt || localPrompt.length > 2000}
-                        className="h-7 px-3 text-[11px] rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all flex items-center gap-1.5"
-                    >
-                        {isSaving ? (
-                            <><Loader2 className="h-3 w-3 animate-spin" /> Saving…</>
-                        ) : saved ? (
-                            <><Check className="h-3 w-3" /> Saved</>
-                        ) : 'Save'}
-                    </Button>
+            <SectionLabel>Custom instructions</SectionLabel>
+            <SettingsCard>
+                <div className="px-3.5 py-3 space-y-2.5">
+                    <Textarea
+                        value={localPrompt}
+                        onChange={(e) => setLocalPrompt(e.target.value)}
+                        placeholder="e.g. I'm a senior TypeScript engineer. Keep responses concise and production-ready."
+                        className={cn(
+                            'min-h-[110px] bg-surface-2 border-border focus:border-ring text-[12.5px] resize-y rounded-md p-3',
+                            'font-mono leading-relaxed',
+                            overLimit && 'border-destructive focus:border-destructive'
+                        )}
+                    />
+                    <div className="flex items-center justify-between">
+                        <p
+                            className={cn(
+                                'font-mono text-[11px] tabular-nums',
+                                overLimit
+                                    ? 'text-destructive'
+                                    : 'text-foreground-subtle'
+                            )}
+                        >
+                            {charCount.toLocaleString()} / 2,000
+                        </p>
+                        <Button
+                            size="sm"
+                            onClick={handleSave}
+                            disabled={
+                                isSaving ||
+                                localPrompt === preferences.systemPrompt ||
+                                overLimit
+                            }
+                        >
+                            {isSaving ? (
+                                <>
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    Saving
+                                </>
+                            ) : saved ? (
+                                <>
+                                    <Check className="h-3.5 w-3.5" />
+                                    Saved
+                                </>
+                            ) : (
+                                'Save'
+                            )}
+                        </Button>
+                    </div>
                 </div>
-            </div>
-
+            </SettingsCard>
         </div>
     );
 }
