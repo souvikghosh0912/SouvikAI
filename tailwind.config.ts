@@ -9,9 +9,44 @@ const config: Config = {
     ],
     theme: {
         extend: {
+            fontFamily: {
+                sans: [
+                    'var(--font-geist-sans)',
+                    'ui-sans-serif',
+                    'system-ui',
+                    '-apple-system',
+                    'BlinkMacSystemFont',
+                    'sans-serif',
+                ],
+                mono: [
+                    'var(--font-geist-mono)',
+                    'ui-monospace',
+                    'SFMono-Regular',
+                    'Menlo',
+                    'monospace',
+                ],
+            },
             colors: {
                 background: 'hsl(var(--background))',
-                foreground: 'hsl(var(--foreground))',
+                surface: {
+                    DEFAULT: 'hsl(var(--surface))',
+                    2: 'hsl(var(--surface-2))',
+                    3: 'hsl(var(--surface-3))',
+                },
+                foreground: {
+                    DEFAULT: 'hsl(var(--foreground))',
+                    muted: 'hsl(var(--foreground-muted))',
+                    subtle: 'hsl(var(--foreground-subtle))',
+                },
+                border: {
+                    DEFAULT: 'hsl(var(--border))',
+                    subtle: 'hsl(var(--border-subtle))',
+                    strong: 'hsl(var(--border-strong))',
+                },
+                brand: {
+                    DEFAULT: 'hsl(var(--brand))',
+                    foreground: 'hsl(var(--brand-foreground))',
+                },
                 card: {
                     DEFAULT: 'hsl(var(--card))',
                     foreground: 'hsl(var(--card-foreground))',
@@ -40,7 +75,8 @@ const config: Config = {
                     DEFAULT: 'hsl(var(--destructive))',
                     foreground: 'hsl(var(--destructive-foreground))',
                 },
-                border: 'hsl(var(--border))',
+                success: 'hsl(var(--success))',
+                warning: 'hsl(var(--warning))',
                 input: 'hsl(var(--input))',
                 ring: 'hsl(var(--ring))',
             },
@@ -48,6 +84,13 @@ const config: Config = {
                 lg: 'var(--radius)',
                 md: 'calc(var(--radius) - 2px)',
                 sm: 'calc(var(--radius) - 4px)',
+            },
+            boxShadow: {
+                'subtle': '0 1px 0 0 hsl(var(--border) / 0.6)',
+                'elevated':
+                    '0 1px 0 0 hsl(var(--border-subtle)), 0 8px 24px -8px hsl(var(--background) / 0.4), 0 4px 12px -4px hsl(var(--background) / 0.3)',
+                'overlay':
+                    '0 12px 40px -8px rgb(0 0 0 / 0.25), 0 2px 8px -2px rgb(0 0 0 / 0.15)',
             },
         },
     },

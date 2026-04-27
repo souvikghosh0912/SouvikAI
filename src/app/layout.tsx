@@ -1,14 +1,22 @@
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
+import { GeistSans } from 'geist/font/sans';
+import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ThemeProvider } from '@/components/theme-provider';
 
-const inter = Inter({ subsets: ['latin'] });
-
 export const metadata: Metadata = {
-    title: "Souvik's AI - Chat",
-    description: 'AI-powered chat assistant',
+    title: "Souvik's AI",
+    description: 'A fast, private AI chat assistant.',
+};
+
+export const viewport: Viewport = {
+    themeColor: [
+        { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+        { media: '(prefers-color-scheme: dark)', color: '#0f0f0f' },
+    ],
+    width: 'device-width',
+    initialScale: 1,
 };
 
 export default function RootLayout({
@@ -17,8 +25,12 @@ export default function RootLayout({
     children: React.ReactNode;
 }) {
     return (
-        <html lang="en" suppressHydrationWarning>
-            <body className={inter.className}>
+        <html
+            lang="en"
+            className={`${GeistSans.variable} ${GeistMono.variable} bg-background`}
+            suppressHydrationWarning
+        >
+            <body className="font-sans antialiased min-h-screen bg-background text-foreground">
                 <ThemeProvider
                     attribute="class"
                     defaultTheme="dark"
