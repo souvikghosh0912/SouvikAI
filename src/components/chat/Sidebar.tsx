@@ -31,7 +31,7 @@ import {
 import { ChatSession } from '@/types/chat';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
-import { SettingsModal } from '@/components/settings/SettingsModal';
+import { SettingsModal } from '@/components/chat/settings/SettingsModal';
 import { formatRelativeTime } from '@/utils/date-helpers';
 
 interface SidebarProps {
