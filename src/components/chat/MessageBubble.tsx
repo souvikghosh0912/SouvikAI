@@ -1,7 +1,6 @@
 'use client';
 
 import { Avatar, AvatarFallback } from '@/components/ui';
-import ShinyText from '@/components/ui/ShinyText';
 import { useChatPreferences } from '@/hooks/useChatPreferences';
 import { Message } from '@/types/chat';
 import { cn } from '@/lib/utils';
@@ -10,7 +9,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useState } from 'react';
 import { MessageActions } from './MessageActions';
-import { WebSearchIndicator } from './WebSearchIndicator';
+import { ThinkingTimeline } from './ThinkingTimeline';
 // Prism renderer — smaller bundle than highlight.js, better language auto-detection
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -59,11 +58,6 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
     const isUser = message.role === 'user';
     const { preferences } = useChatPreferences();
     const [copied, setCopied] = useState<string | null>(null);
-    const [isThoughtExpanded, setIsThoughtExpanded] = useState(false);
-
-    // Timer state for thinking duration
-    const [thoughtStartTime] = useState<number>(Date.now());
-    const [thoughtDurationMs, setThoughtDurationMs] = useState<number | null>(null);
 
     const handleCopy = (text: string) => {
         navigator.clipboard.writeText(text);
@@ -104,55 +98,16 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
     }
 
     const hasThought = thinkContent.length > 0;
-    // Suppress the generic Thinking… indicator while web search is in progress —
-    // the WebSearchIndicator shimmer replaces it.
-    const isWebSearching = !isUser && message.webSearch?.status === 'searching';
-    const showThinkingIndicator = !isWebSearching &&
-        ((isLoading && !displayContent && !hasThought) || isThinking || hasThought);
-
-    // Track when thinking finishes to lock in the duration
-    if (hasThought && !isThinking && thoughtDurationMs === null) {
-        setThoughtDurationMs(Date.now() - thoughtStartTime);
-    }
-
-    const renderThinkingToggle = () => {
-        if (!showThinkingIndicator) return null;
-
-        if (isThinking || (isLoading && !hasThought)) {
-            return (
-                <div
-                    className="py-1 animate-fade-in cursor-pointer order-first mb-2"
-                    onClick={() => hasThought && setIsThoughtExpanded(!isThoughtExpanded)}
-                >
-                    <ShinyText
-                        text={isThoughtExpanded && hasThought ? thinkContent : 'Thinking...'}
-                        speed={2.5}
-                        delay={0.4}
-                        color="#6b6b6b"
-                        shineColor="#e0e0e0"
-                        spread={90}
-                        className="text-sm font-medium whitespace-pre-wrap"
-                    />
-                </div>
-            );
-        }
-
-        const seconds = Math.max(1, Math.floor((thoughtDurationMs ?? 0) / 1000));
-        const durationText = seconds >= 60
-            ? `${Math.floor(seconds / 60)} minute${Math.floor(seconds / 60) > 1 ? 's' : ''}`
-            : `${seconds} second${seconds > 1 ? 's' : ''}`;
-
-        return (
-            <div
-                className="py-1 animate-fade-in cursor-pointer order-first mb-2"
-                onClick={() => setIsThoughtExpanded(!isThoughtExpanded)}
-            >
-                <div className="text-sm font-medium text-foreground whitespace-pre-wrap">
-                    {isThoughtExpanded ? thinkContent : `Thought for ${durationText}`}
-                </div>
-            </div>
-        );
-    };
+    const hasWebSearch = !isUser && !!message.webSearch;
+    // Show the timeline whenever the assistant has any reasoning artifact —
+    // active thinking, completed thoughts, a web-search step, or just the
+    // initial waiting-for-first-token loading state.
+    const showTimeline = !isUser && (
+        hasWebSearch ||
+        hasThought ||
+        isThinking ||
+        (!!isLoading && !displayContent)
+    );
 
     // ── Timestamp ─────────────────────────────────────────────────────────────
     // Show as a CSS tooltip via title + a custom span that appears on group-hover.
@@ -204,14 +159,19 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
                     'prose-td:border prose-td:border-border/50 prose-td:px-4 prose-td:py-2',
                     'prose-table:border-collapse prose-table:w-full prose-table:my-4 prose-table:rounded-lg prose-table:overflow-hidden',
                 )}>
-                    {/* Web search indicator — shown above content whenever present */}
-                    {!isUser && message.webSearch && (
-                        <WebSearchIndicator webSearch={message.webSearch} />
+                    {/* Thinking timeline — labeled, collapsible reasoning steps
+                        with the web-search tool call rendered inline as one row. */}
+                    {showTimeline && (
+                        <ThinkingTimeline
+                            thinkContent={thinkContent}
+                            isThinking={isThinking}
+                            isLoading={!!isLoading}
+                            webSearch={message.webSearch}
+                        />
                     )}
-                    {!displayContent ? renderThinkingToggle() : (
+                    {displayContent && (
                         <div className="flex flex-col gap-2">
-                            {displayContent && (
-                                <ReactMarkdown
+                            <ReactMarkdown
                                     remarkPlugins={[remarkGfm]}
                                     components={{
                                         p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
@@ -282,11 +242,9 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
                                             </pre>
                                         ),
                                     }}
-                                >
-                                    {displayContent}
-                                </ReactMarkdown>
-                            )}
-                            {displayContent && renderThinkingToggle()}
+                            >
+                                {displayContent}
+                            </ReactMarkdown>
                         </div>
                     )}
                 </div>
