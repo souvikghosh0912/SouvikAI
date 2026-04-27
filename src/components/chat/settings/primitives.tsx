@@ -232,7 +232,7 @@ export function InlineSelect<T extends string>({
     value,
     options,
     onValueChange,
-    defaultValue = 'default',
+    defaultValue,
 }: {
     value: T;
     options: { value: T; label: string }[];
@@ -243,7 +243,7 @@ export function InlineSelect<T extends string>({
     const [open, setOpen] = React.useState(false);
     const ref = React.useRef<HTMLDivElement>(null);
     const label = options.find((o) => o.value === value)?.label ?? value;
-    const isCustom = value !== defaultValue;
+    const isCustom = defaultValue !== undefined && value !== defaultValue;
 
     React.useEffect(() => {
         if (!open) return;
