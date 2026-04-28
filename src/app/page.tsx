@@ -9,6 +9,16 @@ import { useChat } from '@/hooks/useChat';
 import { useQuota } from '@/hooks/useQuota';
 import { Loader2, Menu, UserCircle, Bell, Archive } from 'lucide-react';
 import { Button, SimpleTooltip } from '@/components/ui';
+import type { Attachment } from '@/types/attachments';
+
+/** Same key used by the project page's empty-state composer. */
+const PENDING_KEY = (projectId: string) => `souvik:pending-project-msg:${projectId}`;
+
+interface PendingProjectMessage {
+    message: string;
+    attachments: Attachment[];
+    tool?: string;
+}
 
 interface PendingAction {
     type: 'delete' | 'archive';
@@ -39,6 +49,16 @@ function ChatPageInner() {
     const [pendingMessage, setPendingMessage] = useState('');
     const consumedSessionParamRef = useRef<string | null>(null);
     const consumedProjectParamRef = useRef<string | null>(null);
+    /**
+     * Pending payload pulled from sessionStorage when arriving via
+     * `?project=<id>` from the project page's empty-state composer. We can't
+     * call sendMessage straight away because newChat queues a state update
+     * that nullifies currentSessionId; the autosend effect below waits for
+     * that to settle, then fires the message into the freshly-created
+     * project-bound session.
+     */
+    const pendingAutoSendRef = useRef<PendingProjectMessage | null>(null);
+    const [autoSendTrigger, setAutoSendTrigger] = useState(0);
 
     const {
         messages,
@@ -79,7 +99,12 @@ function ChatPageInner() {
     // ── Start a project-bound new chat from `?project=<id>` (used by the
     //    "New chat" button on the project page). The next session created via
     //    `sendMessage` will be assigned to this project; the URL is then
-    //    cleared so subsequent new chats default back to no project. ────────
+    //    cleared so subsequent new chats default back to no project.
+    //
+    //    If the project page's empty-state composer staged a payload in
+    //    sessionStorage, we read it here and bump `autoSendTrigger` so the
+    //    effect below auto-fires sendMessage once newChat's state flush
+    //    nullifies currentSessionId.
     useEffect(() => {
         const projectParam = searchParams.get('project');
         if (
@@ -88,10 +113,48 @@ function ChatPageInner() {
             consumedProjectParamRef.current !== projectParam
         ) {
             consumedProjectParamRef.current = projectParam;
+
+            // Pull and clear any staged payload from the project composer.
+            try {
+                const raw = sessionStorage.getItem(PENDING_KEY(projectParam));
+                if (raw) {
+                    sessionStorage.removeItem(PENDING_KEY(projectParam));
+                    const parsed = JSON.parse(raw) as Partial<PendingProjectMessage>;
+                    if (typeof parsed?.message === 'string' && parsed.message.trim()) {
+                        pendingAutoSendRef.current = {
+                            message: parsed.message,
+                            attachments: Array.isArray(parsed.attachments) ? parsed.attachments : [],
+                            tool: typeof parsed.tool === 'string' ? parsed.tool : undefined,
+                        };
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to read pending project message:', err);
+            }
+
             newChat(projectParam);
+            // Always bump so the autosend effect re-evaluates even when
+            // currentSessionId was already null (e.g. coming from /chats).
+            if (pendingAutoSendRef.current) {
+                setAutoSendTrigger((t) => t + 1);
+            }
             router.replace('/');
         }
     }, [searchParams, isAuthenticated, newChat, router]);
+
+    // ── Autosend the pending project message ──────────────────────────────
+    // Runs after newChat's state update has flushed. We must wait for
+    // currentSessionId to be null so sendMessage's closure creates a fresh
+    // session via createSessionInDB (which reads pendingProjectIdRef set by
+    // newChat) instead of appending to whatever chat was previously open.
+    useEffect(() => {
+        if (autoSendTrigger === 0) return;
+        if (currentSessionId !== null) return;
+        const payload = pendingAutoSendRef.current;
+        if (!payload) return;
+        pendingAutoSendRef.current = null;
+        sendMessage(payload.message, payload.attachments, payload.tool);
+    }, [autoSendTrigger, currentSessionId, sendMessage]);
 
     // ── QUOTA CHECKING ──────────────────────────────────────────────────────────
     const quota = useQuota(selectedModelId, models);
