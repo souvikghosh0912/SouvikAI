@@ -1,4 +1,5 @@
 import type { BuilderFiles } from '@/types/code';
+import { PROMPT_TOOLS } from './tools';
 
 /** Hard cap on file content included in the system prompt to keep token usage sane. */
 const MAX_FILE_CHARS = 6_000;
@@ -10,7 +11,9 @@ const MAX_TOTAL_CHARS = 28_000;
  *
  * The prompt embeds:
  *   1. The agent's persona, capabilities, and rules.
- *   2. A strict description of the action / milestone tag format.
+ *   2. A strict description of the action / milestone tag format — composed
+ *      automatically from each tool's {@link PromptTool.promptSection} so
+ *      adding a new tool only requires touching that one file.
  *   3. The current state of the virtual file system (paths + contents).
  *
  * Files are truncated when they exceed `MAX_FILE_CHARS`; the listing as a
@@ -18,6 +21,7 @@ const MAX_TOTAL_CHARS = 28_000;
  */
 export function buildBuilderSystemPrompt(files: BuilderFiles): string {
     const fileListing = renderFileListing(files);
+    const toolDocs = PROMPT_TOOLS.map((t) => t.promptSection).join('\n\n');
 
     return `You are Builder, an autonomous coding agent that constructs and edits a
 Next.js + Tailwind CSS web project on behalf of the user.
@@ -43,55 +47,7 @@ Your response is a stream of free-form prose interleaved with two kinds of
 XML-style tags. Anything outside a tag is treated as plain prose shown to the
 user.
 
-### Milestones
-
-Use a milestone before each major step so the user sees your progress in real
-time. Keep them short (3–7 words). Examples:
-
-  <milestone>Planning the layout</milestone>
-  <milestone>Adding the hero section</milestone>
-  <milestone>Wiring up the contact form</milestone>
-
-### File actions
-
-To CREATE a new file, output:
-
-  <action type="create" path="app/components/Hero.tsx">
-  // complete file contents go here, exactly as they should be saved
-  </action>
-
-To REPLACE an existing file (you must always send the full new contents — never
-diffs, never partial files, never "// rest unchanged" placeholders), output:
-
-  <action type="edit" path="app/page.tsx">
-  // full new contents
-  </action>
-
-To DELETE a file, output a self-closing tag:
-
-  <action type="delete" path="app/old-component.tsx" />
-
-To RENAME or MOVE a file, output a self-closing tag with \`from\` and \`to\`:
-
-  <action type="rename" from="app/Hero.tsx" to="app/components/Hero.tsx" />
-
-Renames preserve the file's contents — do not also emit a create + delete pair
-for the same move. If the destination already exists it will be overwritten.
-
-### Reading a file (tool call)
-
-When a file in PROJECT FILES is shown truncated (you'll see
-\`[file truncated, original length N chars]\`) and you need the full content
-to edit it correctly, request it with a self-closing read tag:
-
-  <read path="app/page.tsx" />
-
-After emitting one or more \`<read>\` tags, STOP your response. The system
-will reply with the full contents of every file you requested and you can
-then continue your task in a follow-up turn. Do not emit \`<action>\` tags
-in the same response as a \`<read>\` — finish your reads first, then act on
-the contents you receive back. You may issue at most a couple of read rounds
-per turn, so request every file you'll need at once.
+${toolDocs}
 
 ## Hard rules
 

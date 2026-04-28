@@ -2,13 +2,24 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-    BuilderFiles,
-    BuilderFileAction,
     BuilderMessage,
     BuilderStep,
     BuilderStreamEvent,
     BuilderWorkspace,
 } from '@/types/code';
+import { consumeNDJSONStream } from '@/lib/streaming/ndjson';
+import {
+    applyAction,
+    deriveWorkspaceTitle,
+    genId,
+    nextActiveFile,
+} from './builder/file-state';
+import {
+    deleteWorkspaceFile,
+    loadWorkspace,
+    saveActiveFile,
+    saveFile,
+} from './builder/persistence';
 
 interface HookState {
     workspace: BuilderWorkspace | null;
@@ -51,31 +62,6 @@ const PLACEHOLDER_WORKSPACE = (id: string): BuilderWorkspace => ({
     updatedAt: Date.now(),
 });
 
-function genId(prefix = 'm'): string {
-    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function applyAction(files: BuilderFiles, action: BuilderFileAction): BuilderFiles {
-    if (action.kind === 'delete') {
-        if (!(action.path in files)) return files;
-        const next = { ...files };
-        delete next[action.path];
-        return next;
-    }
-    if (action.kind === 'rename') {
-        if (action.from === action.to) return files;
-        if (!(action.from in files)) {
-            // Source missing — nothing to move. The server will no-op too.
-            return files;
-        }
-        const next = { ...files };
-        next[action.to] = next[action.from];
-        delete next[action.from];
-        return next;
-    }
-    return { ...files, [action.path]: action.content };
-}
-
 /**
  * Owns one Builder workspace session backed by Supabase.
  *
@@ -117,42 +103,18 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
         }));
 
         (async () => {
-            try {
-                const res = await fetch(`/api/code/workspaces/${workspaceId}`, {
-                    cache: 'no-store',
-                });
-                if (cancelled) return;
-                if (!res.ok) {
-                    let msg = `Failed to load workspace (${res.status})`;
-                    try {
-                        const data = await res.json();
-                        if (data?.error) msg = data.error;
-                    } catch {
-                        /* ignore */
-                    }
-                    setState((s) => ({
-                        ...s,
-                        isLoading: false,
-                        loadError: msg,
-                    }));
-                    return;
-                }
-                const data = (await res.json()) as { workspace: BuilderWorkspace };
-                if (cancelled) return;
-                setState((s) => ({
-                    ...s,
-                    workspace: data.workspace,
-                    isLoading: false,
-                    loadError: null,
-                }));
-            } catch (err) {
-                if (cancelled) return;
-                setState((s) => ({
-                    ...s,
-                    isLoading: false,
-                    loadError: (err as Error)?.message ?? 'Failed to load workspace',
-                }));
+            const result = await loadWorkspace(workspaceId);
+            if (cancelled) return;
+            if (!result.ok) {
+                setState((s) => ({ ...s, isLoading: false, loadError: result.message }));
+                return;
             }
+            setState((s) => ({
+                ...s,
+                workspace: result.workspace,
+                isLoading: false,
+                loadError: null,
+            }));
         })();
 
         return () => {
@@ -160,12 +122,16 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
         };
     }, [workspaceId]);
 
-    // Cleanup pending timers on unmount.
+    // Cleanup pending timers on unmount. Capture the ref values into the
+    // effect closure so the cleanup uses the same Map/timer that was live
+    // when the effect mounted (silences exhaustive-deps in strict mode).
     useEffect(() => {
+        const saveTimers = saveTimersRef.current;
+        const activeFileTimer = activeFileTimerRef.current;
         return () => {
-            saveTimersRef.current.forEach((t) => clearTimeout(t));
-            saveTimersRef.current.clear();
-            if (activeFileTimerRef.current) clearTimeout(activeFileTimerRef.current);
+            saveTimers.forEach((t) => clearTimeout(t));
+            saveTimers.clear();
+            if (activeFileTimer) clearTimeout(activeFileTimer);
         };
     }, []);
 
@@ -206,11 +172,7 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
             // the server.
             if (activeFileTimerRef.current) clearTimeout(activeFileTimerRef.current);
             activeFileTimerRef.current = setTimeout(() => {
-                fetch(`/api/code/workspaces/${workspaceId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ activeFile: path }),
-                }).catch((err) => console.warn('[Builder] save activeFile failed:', err));
+                saveActiveFile(workspaceId, path);
             }, 300);
         },
         [workspaceId],
@@ -237,11 +199,7 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
             if (existing) clearTimeout(existing);
             const handle = setTimeout(() => {
                 timers.delete(path);
-                fetch(`/api/code/workspaces/${workspaceId}/files`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path, content }),
-                }).catch((err) => console.warn('[Builder] save file failed:', err));
+                saveFile(workspaceId, path, content);
             }, 600);
             timers.set(path, handle);
         },
@@ -278,15 +236,7 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
                 };
             });
 
-            try {
-                await fetch(`/api/code/workspaces/${workspaceId}/files`, {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path }),
-                });
-            } catch (err) {
-                console.warn('[Builder] delete file failed:', err);
-            }
+            await deleteWorkspaceFile(workspaceId, path);
         },
         [workspaceId],
     );
@@ -340,7 +290,7 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
                         messages: nextMessages,
                         title:
                             s.workspace.messages.length === 0 && userMsg
-                                ? deriveTitle(userMsg.content)
+                                ? deriveWorkspaceTitle(userMsg.content)
                                 : s.workspace.title,
                         updatedAt: Date.now(),
                     },
@@ -373,7 +323,7 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
                     throw new Error(msg);
                 }
 
-                await consumeStream(res.body, (ev) => {
+                await consumeNDJSONStream<BuilderStreamEvent>(res.body, (ev) => {
                     handleStreamEvent(ev, assistantMsg.id);
                 });
 
@@ -453,26 +403,11 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
                     setState((s) => {
                         if (!s.workspace) return s;
                         const newFiles = applyAction(s.workspace.files, ev.action);
-                        let activeFile = s.workspace.activeFile;
-                        if (
-                            ev.action.kind === 'delete' &&
-                            activeFile === ev.action.path
-                        ) {
-                            const keys = Object.keys(newFiles);
-                            activeFile = keys[0] ?? null;
-                        } else if (
-                            ev.action.kind === 'rename' &&
-                            activeFile === ev.action.from
-                        ) {
-                            // Follow the move so the editor stays focused on
-                            // the same logical file.
-                            activeFile = ev.action.to;
-                        } else if (
-                            (ev.action.kind === 'create' || ev.action.kind === 'edit') &&
-                            !activeFile
-                        ) {
-                            activeFile = ev.action.path;
-                        }
+                        const activeFile = nextActiveFile(
+                            s.workspace.activeFile,
+                            newFiles,
+                            ev.action,
+                        );
 
                         return {
                             ...s,
@@ -569,50 +504,4 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
         resumePending,
         abort,
     };
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Read NDJSON events from a streaming response body. */
-async function consumeStream(
-    body: ReadableStream<Uint8Array>,
-    onEvent: (ev: BuilderStreamEvent) => void,
-): Promise<void> {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-                const ev = JSON.parse(trimmed) as BuilderStreamEvent;
-                onEvent(ev);
-            } catch {
-                // Malformed line — skip, don't tear down the stream.
-            }
-        }
-    }
-
-    const trailing = buffer.trim();
-    if (trailing) {
-        try {
-            onEvent(JSON.parse(trailing) as BuilderStreamEvent);
-        } catch {
-            /* ignore */
-        }
-    }
-}
-
-function deriveTitle(message: string): string {
-    const words = message.split(/\s+/).slice(0, 6).join(' ');
-    return words.length > 50 ? words.slice(0, 50) + '…' : words || 'New build';
 }

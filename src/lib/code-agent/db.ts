@@ -1,4 +1,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Workspace persistence layer for the Builder agent.
+ *
+ * This module owns:
+ *   • Reads of workspace state (files + messages + summary listings).
+ *   • Workspace lifecycle CRUD (create / rename / delete / set-active-file).
+ *   • Direct, user-driven file edits from the editor (`upsert`/`delete`).
+ *   • Persisting agent-emitted file actions (delegated to per-tool executors
+ *     in {@link ./tools/action.ts}).
+ *
+ * Per-action tool logic (the rules for what `<action type="create">` does
+ * versus `<action type="rename">`) lives in `./tools/{create,edit,delete,
+ * rename}.ts`. This file is the integration point — it dispatches to those
+ * executors via {@link executeFileAction}.
+ */
 import type { createClient } from '@/lib/supabase/server';
 import { Database } from '@/types/database';
 import type {
@@ -10,6 +25,9 @@ import type {
     BuilderWorkspaceSummary,
 } from '@/types/code';
 import { BASE_TEMPLATE, DEFAULT_ACTIVE_FILE } from './template';
+import { executeFileAction } from './tools/action';
+import { CREATE_TOOL_LIMITS } from './tools/create';
+import { clampContent, MAX_FILE_BYTES } from './tools/utils';
 
 /**
  * The cookie-bound server Supabase client. We pin DB to the factory's return
@@ -23,15 +41,7 @@ type WorkspaceRow = Database['public']['Tables']['builder_workspaces']['Row'];
 type FileRow = Database['public']['Tables']['builder_files']['Row'];
 type MessageRow = Database['public']['Tables']['builder_messages']['Row'];
 
-const MAX_FILE_BYTES = 256 * 1024; // 256KB per file — guards against runaway model output
-const MAX_FILES_PER_WORKSPACE = 200;
 const MAX_TITLE_LEN = 200;
-
-/** Truncate a model-emitted file body before persisting. */
-function clampContent(content: string): string {
-    if (content.length <= MAX_FILE_BYTES) return content;
-    return content.slice(0, MAX_FILE_BYTES) + '\n/* [truncated] */\n';
-}
 
 function deriveTitle(message: string): string {
     const stripped = message.replace(/\s+/g, ' ').trim();
@@ -126,7 +136,28 @@ export async function listWorkspacesForUser(
     }));
 }
 
-// ── Writes ───────────────────────────────────────────────────────────────────
+/**
+ * Cheap fetch of a workspace's `path → content` map. Used by the agent route
+ * between phases of a tool-using turn (after running file actions, the
+ * agent's next prompt needs the freshly applied content).
+ */
+export async function fetchWorkspaceFiles(
+    supabase: DB,
+    workspaceId: string,
+): Promise<BuilderFiles> {
+    const { data, error } = await supabase
+        .from('builder_files')
+        .select('path, content')
+        .eq('workspace_id', workspaceId);
+    if (error) throw error;
+    const out: BuilderFiles = {};
+    for (const row of (data ?? []) as Pick<FileRow, 'path' | 'content'>[]) {
+        out[row.path] = row.content;
+    }
+    return out;
+}
+
+// ── Writes — workspace lifecycle ─────────────────────────────────────────────
 
 /**
  * Create a fresh workspace pre-loaded with the base Next.js + Tailwind template
@@ -234,86 +265,22 @@ export async function setWorkspaceActiveFile(
     if (error) throw error;
 }
 
+// ── Writes — agent-driven file actions ───────────────────────────────────────
+
 /**
- * Apply a single agent file action to the database. Idempotent for create/edit
- * (upsert by composite key); silent no-op when deleting a non-existent path.
+ * Apply a single agent file action to the database by routing to the
+ * relevant tool's executor. See `./tools/{create,edit,delete,rename}.ts`
+ * for per-action behaviour.
  */
 export async function applyFileAction(
     supabase: DB,
     workspaceId: string,
     action: BuilderFileAction,
 ): Promise<void> {
-    const sb = supabase as any;
-
-    if (action.kind === 'delete') {
-        const { error } = await sb
-            .from('builder_files')
-            .delete()
-            .eq('workspace_id', workspaceId)
-            .eq('path', action.path);
-        if (error) throw error;
-        return;
-    }
-
-    if (action.kind === 'rename') {
-        if (action.from === action.to) return; // no-op
-        // Drop the destination if it already exists (overwrite semantics) and
-        // then move the source row into its place. Done as two statements so
-        // the unique (workspace_id, path) index never trips.
-        const { error: delErr } = await sb
-            .from('builder_files')
-            .delete()
-            .eq('workspace_id', workspaceId)
-            .eq('path', action.to);
-        if (delErr) throw delErr;
-        const { error: updErr } = await sb
-            .from('builder_files')
-            .update({ path: action.to })
-            .eq('workspace_id', workspaceId)
-            .eq('path', action.from);
-        if (updErr) throw updErr;
-        // If the workspace's active file was the source path, follow the move.
-        await sb
-            .from('builder_workspaces')
-            .update({ active_file: action.to })
-            .eq('id', workspaceId)
-            .eq('active_file', action.from);
-        return;
-    }
-
-    // Cap the workspace size to avoid runaway models exhausting storage.
-    if (action.kind === 'create') {
-        const { count, error: cErr } = await supabase
-            .from('builder_files')
-            .select('*', { count: 'exact', head: true })
-            .eq('workspace_id', workspaceId);
-        if (cErr) throw cErr;
-        if ((count ?? 0) >= MAX_FILES_PER_WORKSPACE) {
-            // Upsert on existing path is OK; new path is rejected.
-            const { data: existing, error: exErr } = await supabase
-                .from('builder_files')
-                .select('id')
-                .eq('workspace_id', workspaceId)
-                .eq('path', action.path)
-                .maybeSingle();
-            if (exErr) throw exErr;
-            if (!existing) {
-                throw new Error(
-                    `Workspace file limit reached (${MAX_FILES_PER_WORKSPACE}). Delete unused files before adding more.`,
-                );
-            }
-        }
-    }
-
-    const content = clampContent(action.content);
-    const { error } = await sb
-        .from('builder_files')
-        .upsert(
-            { workspace_id: workspaceId, path: action.path, content },
-            { onConflict: 'workspace_id,path' },
-        );
-    if (error) throw error;
+    await executeFileAction(supabase, workspaceId, action);
 }
+
+// ── Writes — chat messages ───────────────────────────────────────────────────
 
 /**
  * Persist a single chat message (user or assistant). For assistant messages,
@@ -348,6 +315,8 @@ export async function insertBuilderMessage(
     if (error || !data) throw error ?? new Error('Failed to insert builder message');
     return (data as { id: string }).id;
 }
+
+// ── Writes — direct (editor-driven) file mutations ───────────────────────────
 
 /**
  * Update the contents of a single file in a workspace. Used by the editor's
@@ -402,28 +371,12 @@ export async function deleteWorkspaceFile(
 }
 
 /**
- * Cheap fetch of a workspace's `path → content` map. Used by the agent route
- * between phases of a tool-using turn (after running file actions, the
- * agent's next prompt needs the freshly applied content).
+ * Aggregated workspace-storage limits. The per-tool details (e.g. `MAX_FILES_
+ * PER_WORKSPACE`) live alongside the tool that enforces them and are
+ * re-exported here for backwards compatibility.
  */
-export async function fetchWorkspaceFiles(
-    supabase: DB,
-    workspaceId: string,
-): Promise<BuilderFiles> {
-    const { data, error } = await supabase
-        .from('builder_files')
-        .select('path, content')
-        .eq('workspace_id', workspaceId);
-    if (error) throw error;
-    const out: BuilderFiles = {};
-    for (const row of (data ?? []) as Pick<FileRow, 'path' | 'content'>[]) {
-        out[row.path] = row.content;
-    }
-    return out;
-}
-
 export const BUILDER_DB_LIMITS = {
     MAX_FILE_BYTES,
-    MAX_FILES_PER_WORKSPACE,
+    MAX_FILES_PER_WORKSPACE: CREATE_TOOL_LIMITS.MAX_FILES_PER_WORKSPACE,
     MAX_TITLE_LEN,
 };
