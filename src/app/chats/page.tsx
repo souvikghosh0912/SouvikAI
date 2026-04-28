@@ -67,6 +67,8 @@ export default function AllChatsPage() {
                 isPinned: s.is_pinned ?? false,
                 isArchived: s.is_archived ?? false,
                 projectId: s.project_id ?? null,
+                branchedFromSessionId: s.branched_from_session_id ?? null,
+                branchedFromTitle: s.branched_from_title ?? null,
             }));
             setSessions(mapped);
         }
