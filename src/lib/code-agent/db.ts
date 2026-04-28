@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { createClient } from '@/lib/supabase/server';
 import { Database } from '@/types/database';
 import type {
@@ -11,10 +12,10 @@ import type {
 import { BASE_TEMPLATE, DEFAULT_ACTIVE_FILE } from './template';
 
 /**
- * The cookie-bound server Supabase client. Inferring from the factory keeps
- * the schema generic in sync with whatever `createServerClient<Database>` is
- * configured with — typing it manually as `SupabaseClient<Database>` collapses
- * the table generics to `never` and breaks every `.insert()` / `.update()`.
+ * The cookie-bound server Supabase client. We pin DB to the factory's return
+ * type so reads (`.select()`) stay schema-typed, but cast to `any` at write
+ * sites because @supabase/ssr's strict Insert/Update types collapse to `never`
+ * with our schema marker. This matches the existing pattern in branch-chat.ts.
  */
 type DB = Awaited<ReturnType<typeof createClient>>;
 
@@ -35,8 +36,9 @@ function clampContent(content: string): string {
 function deriveTitle(message: string): string {
     const stripped = message.replace(/\s+/g, ' ').trim();
     if (!stripped) return 'New build';
-    const sliced = stripped.length > MAX_TITLE_LEN ? stripped.slice(0, MAX_TITLE_LEN - 1).trimEnd() + '…' : stripped;
-    return sliced;
+    return stripped.length > MAX_TITLE_LEN
+        ? stripped.slice(0, MAX_TITLE_LEN - 1).trimEnd() + '…'
+        : stripped;
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────
@@ -114,7 +116,8 @@ export async function listWorkspacesForUser(
         .limit(limit);
 
     if (error) throw error;
-    return (data ?? []).map((row) => ({
+    type SummaryRow = Pick<WorkspaceRow, 'id' | 'title' | 'active_file' | 'created_at' | 'updated_at'>;
+    return ((data ?? []) as SummaryRow[]).map((row) => ({
         id: row.id,
         title: row.title,
         activeFile: row.active_file,
@@ -138,8 +141,9 @@ export async function createWorkspaceForUser(
     opts: { initialMessage?: string } = {},
 ): Promise<string> {
     const title = opts.initialMessage ? deriveTitle(opts.initialMessage) : 'New build';
+    const sb = supabase as any;
 
-    const wsInsert = await supabase
+    const wsInsert = await sb
         .from('builder_workspaces')
         .insert({
             user_id: userId,
@@ -160,15 +164,15 @@ export async function createWorkspaceForUser(
         path,
         content,
     }));
-    const filesInsert = await supabase.from('builder_files').insert(fileRows);
+    const filesInsert = await sb.from('builder_files').insert(fileRows);
     if (filesInsert.error) {
         // Roll back — the workspace is empty / orphaned otherwise.
-        await supabase.from('builder_workspaces').delete().eq('id', workspaceId);
+        await sb.from('builder_workspaces').delete().eq('id', workspaceId);
         throw filesInsert.error;
     }
 
     if (opts.initialMessage && opts.initialMessage.trim()) {
-        const msgInsert = await supabase.from('builder_messages').insert({
+        const msgInsert = await sb.from('builder_messages').insert({
             workspace_id: workspaceId,
             user_id: userId,
             role: 'user',
@@ -176,7 +180,7 @@ export async function createWorkspaceForUser(
             steps: [],
         });
         if (msgInsert.error) {
-            await supabase.from('builder_workspaces').delete().eq('id', workspaceId);
+            await sb.from('builder_workspaces').delete().eq('id', workspaceId);
             throw msgInsert.error;
         }
     }
@@ -208,7 +212,7 @@ export async function renameWorkspace(
     const trimmed = title.trim();
     if (!trimmed) throw new Error('Title cannot be empty');
     const safe = trimmed.length > MAX_TITLE_LEN ? trimmed.slice(0, MAX_TITLE_LEN) : trimmed;
-    const { error } = await supabase
+    const { error } = await (supabase as any)
         .from('builder_workspaces')
         .update({ title: safe })
         .eq('id', workspaceId)
@@ -222,7 +226,7 @@ export async function setWorkspaceActiveFile(
     userId: string,
     path: string | null,
 ): Promise<void> {
-    const { error } = await supabase
+    const { error } = await (supabase as any)
         .from('builder_workspaces')
         .update({ active_file: path })
         .eq('id', workspaceId)
@@ -239,8 +243,10 @@ export async function applyFileAction(
     workspaceId: string,
     action: BuilderFileAction,
 ): Promise<void> {
+    const sb = supabase as any;
+
     if (action.kind === 'delete') {
-        const { error } = await supabase
+        const { error } = await sb
             .from('builder_files')
             .delete()
             .eq('workspace_id', workspaceId)
@@ -274,7 +280,7 @@ export async function applyFileAction(
     }
 
     const content = clampContent(action.content);
-    const { error } = await supabase
+    const { error } = await sb
         .from('builder_files')
         .upsert(
             { workspace_id: workspaceId, path: action.path, content },
@@ -301,14 +307,14 @@ export async function insertBuilderMessage(
         errored?: boolean;
     },
 ): Promise<string> {
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
         .from('builder_messages')
         .insert({
             workspace_id: args.workspaceId,
             user_id: args.userId,
             role: args.role,
             content: args.content,
-            steps: (args.steps ?? []) as unknown as Database['public']['Tables']['builder_messages']['Insert']['steps'],
+            steps: args.steps ?? [],
             errored: !!args.errored,
         })
         .select('id')
@@ -338,7 +344,7 @@ export async function upsertWorkspaceFile(
         .maybeSingle();
     if (!ws) throw new Error('Workspace not found');
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
         .from('builder_files')
         .upsert(
             { workspace_id: workspaceId, path, content: clampContent(content) },
@@ -361,7 +367,7 @@ export async function deleteWorkspaceFile(
         .maybeSingle();
     if (!ws) throw new Error('Workspace not found');
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
         .from('builder_files')
         .delete()
         .eq('workspace_id', workspaceId)

@@ -152,7 +152,7 @@ export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
     // Cleanup pending timers on unmount.
     useEffect(() => {
         return () => {
-            for (const t of saveTimersRef.current.values()) clearTimeout(t);
+            saveTimersRef.current.forEach((t) => clearTimeout(t));
             saveTimersRef.current.clear();
             if (activeFileTimerRef.current) clearTimeout(activeFileTimerRef.current);
         };

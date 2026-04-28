@@ -304,6 +304,38 @@ export async function POST(request: NextRequest) {
             }
         };
 
+        // Mirror the parsed event into our server-side accumulators. We do
+        // this in addition to forwarding the raw event downstream so we can
+        // persist the final assistant turn (timeline + content) once the
+        // stream completes, and so file actions get queued for DB writes in
+        // the order they're emitted.
+        const handleServerEvent = (ev: BuilderStreamEvent) => {
+            if (ev.type === 'text') {
+                textAcc += ev.delta;
+                return;
+            }
+            if (ev.type === 'milestone') {
+                closeOpenMilestone();
+                stepsAcc.push({
+                    id: genStepId(),
+                    kind: 'milestone',
+                    text: ev.text,
+                    status: 'doing',
+                });
+                return;
+            }
+            if (ev.type === 'action') {
+                stepsAcc.push({
+                    id: genStepId(),
+                    kind: 'action',
+                    action: ev.action,
+                    status: 'done',
+                });
+                queueWrite(() => persistAction(supabase, workspaceId, ev.action));
+                return;
+            }
+        };
+
         const out = new ReadableStream<Uint8Array>({
             async start(controller) {
                 let errored = false;
@@ -400,34 +432,6 @@ export async function POST(request: NextRequest) {
             },
         });
 
-        // ── Helpers closing over the outer state ─────────────────────────────
-
-        function handleServerEvent(ev: BuilderStreamEvent) {
-            if (ev.type === 'text') {
-                textAcc += ev.delta;
-                return;
-            }
-            if (ev.type === 'milestone') {
-                closeOpenMilestone();
-                stepsAcc.push({
-                    id: genStepId(),
-                    kind: 'milestone',
-                    text: ev.text,
-                    status: 'doing',
-                });
-                return;
-            }
-            if (ev.type === 'action') {
-                stepsAcc.push({
-                    id: genStepId(),
-                    kind: 'action',
-                    action: ev.action,
-                    status: 'done',
-                });
-                queueWrite(() => persistAction(supabase, workspaceId, ev.action));
-                return;
-            }
-        }
     } catch (error) {
         console.error('[Builder Agent] route error:', error);
         return NextResponse.json(
