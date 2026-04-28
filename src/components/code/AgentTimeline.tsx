@@ -54,7 +54,7 @@ export function AgentTimeline({ steps, isStreaming }: AgentTimelineProps) {
     }
 
     return (
-        <div className="my-1 not-prose animate-fade-in">
+        <div className="not-prose animate-fade-in">
             <button
                 type="button"
                 onClick={() => hasSteps && setOpen((o) => !o)}

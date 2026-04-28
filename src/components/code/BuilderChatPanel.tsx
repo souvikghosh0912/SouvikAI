@@ -107,7 +107,7 @@ function MessageView({
     const hasSteps = (message.steps?.length ?? 0) > 0;
 
     return (
-        <div className="flex flex-col gap-2 max-w-full">
+        <div className="flex flex-col max-w-full">
             {hasSteps && (
                 <AgentTimeline
                     steps={message.steps ?? []}
@@ -118,6 +118,7 @@ function MessageView({
                 <div
                     className={cn(
                         'text-[14px] leading-relaxed whitespace-pre-wrap break-words',
+                        hasSteps && 'mt-1.5',
                         message.errored ? 'text-destructive' : 'text-foreground',
                     )}
                 >
