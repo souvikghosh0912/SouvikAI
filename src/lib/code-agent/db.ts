@@ -427,3 +427,52 @@ export const BUILDER_DB_LIMITS = {
     MAX_FILES_PER_WORKSPACE,
     MAX_TITLE_LEN,
 };
+
+/**
+ * Turn an arbitrary error from Supabase / Postgres into a user-facing string
+ * that's actually useful for diagnosis.
+ *
+ * The most common deployment-time failure is forgetting to apply the
+ * `0005_builder.sql` migration, which produces Postgres error 42P01
+ * ("relation does not exist"). We special-case that with an actionable
+ * message; everything else falls back to the underlying message + hint.
+ */
+export function describeBuilderError(err: unknown): {
+    message: string;
+    status: number;
+} {
+    const e = err as {
+        code?: string;
+        message?: string;
+        hint?: string;
+        details?: string;
+        status?: number;
+    } | null;
+
+    if (e?.code === '42P01' || /relation .* does not exist/i.test(e?.message ?? '')) {
+        return {
+            message:
+                "Forge tables haven't been created yet. Apply `migrations/0005_builder.sql` to your Supabase project, then try again.",
+            status: 503,
+        };
+    }
+
+    // Permission / RLS denials → 403.
+    if (e?.code === '42501' || /permission denied|row.level security/i.test(e?.message ?? '')) {
+        return {
+            message:
+                e?.message ||
+                'Permission denied. Check that the Forge tables have RLS policies that allow the current user.',
+            status: 403,
+        };
+    }
+
+    if (e?.message) {
+        const parts: string[] = [e.message];
+        if (e.details) parts.push(`(${e.details})`);
+        if (e.hint) parts.push(`Hint: ${e.hint}`);
+        return { message: parts.join(' '), status: 500 };
+    }
+
+    return { message: 'Unknown database error', status: 500 };
+}
