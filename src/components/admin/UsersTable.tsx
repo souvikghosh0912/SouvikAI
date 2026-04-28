@@ -17,6 +17,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui';
+import { SimpleTooltip } from '@/components/ui';
 import { User } from '@/types/auth';
 import { getUserStatusLabel, getUserStatusColor } from '@/utils/auth-helpers';
 import { formatDate } from '@/lib/utils';
@@ -102,45 +103,65 @@ export function UsersTable({ users, isEditMode, onDelete, onSuspend, onKick, onU
                                 <td className="p-3">
                                     <div className="flex items-center justify-end gap-2">
                                         {user.isKicked ? (
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
+                                            <SimpleTooltip
+                                                content="Unkick user — restore their access"
                                                 disabled={!isEditMode}
-                                                onClick={() => handleUnkick(user)}
-                                                title="Unkick user"
                                             >
-                                                <LogIn className="h-4 w-4 text-green-500" />
-                                            </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    disabled={!isEditMode}
+                                                    onClick={() => handleUnkick(user)}
+                                                    aria-label="Unkick user"
+                                                >
+                                                    <LogIn className="h-4 w-4 text-green-500" />
+                                                </Button>
+                                            </SimpleTooltip>
                                         ) : (
+                                            <SimpleTooltip
+                                                content="Kick user — sign them out of all sessions"
+                                                disabled={!isEditMode}
+                                            >
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    disabled={!isEditMode}
+                                                    onClick={() => handleKick(user)}
+                                                    aria-label="Kick user"
+                                                >
+                                                    <LogOut className="h-4 w-4" />
+                                                </Button>
+                                            </SimpleTooltip>
+                                        )}
+                                        <SimpleTooltip
+                                            content="Suspend user temporarily"
+                                            disabled={!isEditMode}
+                                        >
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
                                                 disabled={!isEditMode}
-                                                onClick={() => handleKick(user)}
-                                                title="Kick user"
+                                                onClick={() => setSuspendDialog({ open: true, user })}
+                                                aria-label="Suspend user"
                                             >
-                                                <LogOut className="h-4 w-4" />
+                                                <Clock className="h-4 w-4" />
                                             </Button>
-                                        )}
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            disabled={!isEditMode}
-                                            onClick={() => setSuspendDialog({ open: true, user })}
-                                            title="Suspend user"
-                                        >
-                                            <Clock className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
+                                        </SimpleTooltip>
+                                        <SimpleTooltip
+                                            content="Delete user — this cannot be undone"
                                             disabled={!isEditMode || user.isDeleted}
-                                            onClick={() => setDeleteDialog({ open: true, user })}
-                                            className="text-destructive hover:text-destructive"
-                                            title="Delete user"
                                         >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                disabled={!isEditMode || user.isDeleted}
+                                                onClick={() => setDeleteDialog({ open: true, user })}
+                                                className="text-destructive hover:text-destructive"
+                                                aria-label="Delete user"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </SimpleTooltip>
                                     </div>
                                 </td>
                             </tr>

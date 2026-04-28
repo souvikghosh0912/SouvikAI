@@ -10,6 +10,7 @@ import {
     DialogHeader,
     DialogTitle,
     DialogFooter,
+    SimpleTooltip,
 } from '@/components/ui';
 import { AIModel } from '@/types/chat';
 import { Edit2, ShieldAlert, ShieldCheck } from 'lucide-react';
@@ -97,28 +98,36 @@ export function ModelsTable({ models, isEditMode, onUpdate }: ModelsTableProps) 
                                     {isEditMode && (
                                         <td className="px-6 py-4 text-right">
                                             <div className="flex justify-end gap-2">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    disabled={isLoading}
-                                                    onClick={() => openEditModel(model)}
-                                                    className="h-8 w-8 p-0"
+                                                <SimpleTooltip content="Edit model configuration">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        disabled={isLoading}
+                                                        onClick={() => openEditModel(model)}
+                                                        className="h-8 w-8 p-0"
+                                                        aria-label="Edit model"
+                                                    >
+                                                        <Edit2 className="h-4 w-4 text-blue-500" />
+                                                    </Button>
+                                                </SimpleTooltip>
+                                                <SimpleTooltip
+                                                    content={model.is_suspended ? 'Reactivate model' : 'Suspend model'}
                                                 >
-                                                    <Edit2 className="h-4 w-4 text-blue-500" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    disabled={isLoading}
-                                                    onClick={() => handleToggleSuspend(model)}
-                                                    className="h-8 w-8 p-0"
-                                                >
-                                                    {model.is_suspended ? (
-                                                        <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                                                    ) : (
-                                                        <ShieldAlert className="h-4 w-4 text-destructive" />
-                                                    )}
-                                                </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        disabled={isLoading}
+                                                        onClick={() => handleToggleSuspend(model)}
+                                                        className="h-8 w-8 p-0"
+                                                        aria-label={model.is_suspended ? 'Reactivate model' : 'Suspend model'}
+                                                    >
+                                                        {model.is_suspended ? (
+                                                            <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                                                        ) : (
+                                                            <ShieldAlert className="h-4 w-4 text-destructive" />
+                                                        )}
+                                                    </Button>
+                                                </SimpleTooltip>
                                             </div>
                                         </td>
                                     )}

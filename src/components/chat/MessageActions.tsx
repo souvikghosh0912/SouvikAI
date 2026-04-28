@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Copy, Check, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SimpleTooltip } from '@/components/ui';
 
 interface MessageActionsProps {
     /** The plain-text content to copy (think-tag-stripped). */
@@ -51,38 +52,42 @@ export function MessageActions({ content, onRegenerate, isLoading }: MessageActi
             'transition-opacity duration-150',
         )}>
             {/* Copy button */}
-            <button
-                onClick={handleCopy}
-                title={copied ? 'Copied!' : 'Copy response'}
-                className={cn(
-                    'flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs',
-                    'text-foreground-muted hover:text-foreground',
-                    'hover:bg-surface-2 transition-colors',
-                )}
-            >
-                {copied
-                    ? <Check className="h-3.5 w-3.5 text-success" />
-                    : <Copy className="h-3.5 w-3.5" />
-                }
-                <span>{copied ? 'Copied' : 'Copy'}</span>
-            </button>
-
-            {/* Regenerate button — hidden while streaming */}
-            {onRegenerate && (
+            <SimpleTooltip content={copied ? 'Copied to clipboard' : 'Copy response'}>
                 <button
-                    onClick={handleRegenerate}
-                    disabled={isLoading || regenPending}
-                    title="Regenerate response"
+                    onClick={handleCopy}
+                    aria-label={copied ? 'Copied' : 'Copy response'}
                     className={cn(
                         'flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs',
                         'text-foreground-muted hover:text-foreground',
                         'hover:bg-surface-2 transition-colors',
-                        (isLoading || regenPending) && 'opacity-40 cursor-not-allowed',
                     )}
                 >
-                    <RefreshCw className={cn('h-3.5 w-3.5', regenPending && 'animate-spin')} />
-                    <span>Regenerate</span>
+                    {copied
+                        ? <Check className="h-3.5 w-3.5 text-success" />
+                        : <Copy className="h-3.5 w-3.5" />
+                    }
+                    <span>{copied ? 'Copied' : 'Copy'}</span>
                 </button>
+            </SimpleTooltip>
+
+            {/* Regenerate button — hidden while streaming */}
+            {onRegenerate && (
+                <SimpleTooltip content="Regenerate response">
+                    <button
+                        onClick={handleRegenerate}
+                        disabled={isLoading || regenPending}
+                        aria-label="Regenerate response"
+                        className={cn(
+                            'flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs',
+                            'text-foreground-muted hover:text-foreground',
+                            'hover:bg-surface-2 transition-colors',
+                            (isLoading || regenPending) && 'opacity-40 cursor-not-allowed',
+                        )}
+                    >
+                        <RefreshCw className={cn('h-3.5 w-3.5', regenPending && 'animate-spin')} />
+                        <span>Regenerate</span>
+                    </button>
+                </SimpleTooltip>
             )}
         </div>
     );
