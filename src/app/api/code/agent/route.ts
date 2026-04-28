@@ -4,6 +4,7 @@ import { streamNvidiaCompletion, parseSSEStream } from '@/lib/nvidia-nim';
 import { Database } from '@/types/database';
 import { buildBuilderSystemPrompt } from '@/lib/code-agent/system-prompt';
 import { BuilderTagStreamParser } from '@/lib/code-agent/parser';
+import { renderReadToolResult } from '@/lib/code-agent/tools/read';
 import {
     applyFileAction,
     fetchWorkspaceFiles,
@@ -34,8 +35,6 @@ const MAX_HISTORY_CHARS_PER_TURN = 4_000;
  * phase. Capped to keep cost & latency bounded.
  */
 const MAX_AGENT_PHASES = 3;
-/** Per file cap for content injected back into a read-result tool message. */
-const MAX_READ_RESULT_CHARS_PER_FILE = 32_000;
 
 interface AgentRequestBody {
     /** Workspace this turn belongs to. Server is the source of truth. */
@@ -188,7 +187,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // ── Persist the new user message (if provided) ───────────────────────
+        // ── Persist the new user message (if provided) ─────────────��─────────
         if (newMessage.trim()) {
             try {
                 await insertBuilderMessage(supabase, {
@@ -583,45 +582,6 @@ function renderHistoryContent(
     return joined.length > MAX_HISTORY_CHARS_PER_TURN
         ? joined.slice(0, MAX_HISTORY_CHARS_PER_TURN) + ' [truncated]'
         : joined;
-}
-
-/**
- * Render the synthetic user message that fulfils a batch of `<read>` tool
- * calls. Each requested file is included in full (subject to a generous
- * per-file cap), or marked NOT FOUND if it doesn't exist in the workspace.
- *
- * Duplicate paths in the request are deduped — the model sometimes asks for
- * the same file twice if it's iterating.
- */
-function renderReadToolResult(
-    paths: string[],
-    files: Record<string, string>,
-): string {
-    const seen = new Set<string>();
-    const blocks: string[] = [];
-    for (const p of paths) {
-        if (seen.has(p)) continue;
-        seen.add(p);
-        const raw = files[p];
-        if (raw === undefined) {
-            blocks.push(`--- FILE NOT FOUND: ${p} ---`);
-            continue;
-        }
-        let content = raw;
-        let suffix = '';
-        if (content.length > MAX_READ_RESULT_CHARS_PER_FILE) {
-            content = content.slice(0, MAX_READ_RESULT_CHARS_PER_FILE);
-            suffix = `\n... [further content truncated; original length ${raw.length} chars]`;
-        }
-        blocks.push(`--- FILE: ${p} ---\n${content}${suffix}\n--- END FILE ---`);
-    }
-    return [
-        '<read-result>',
-        blocks.join('\n\n'),
-        '</read-result>',
-        '',
-        'Above are the full contents you requested. Continue your previous task using these contents — emit milestones, file actions, and a final summary as usual. Do not emit `<read>` again unless you genuinely need another file.',
-    ].join('\n');
 }
 
 /**
