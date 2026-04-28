@@ -1,37 +1,16 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import {
-    Plus,
     MessageSquare,
-    Trash2,
-    LogOut,
     PanelLeftClose,
     PanelLeftOpen,
     X,
-    Search,
-    Image as ImageIcon,
-    Grid2X2,
-    Code2,
-    MoreHorizontal,
     Pin,
-    Archive,
-    Settings,
     LayoutList,
-    Pencil,
-    GitBranch,
 } from 'lucide-react';
-import {
-    Button,
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-    Avatar,
-    AvatarFallback,
-    SimpleTooltip,
-} from '@/components/ui';
+import { Button, SimpleTooltip } from '@/components/ui';
 import { ChatSession } from '@/types/chat';
 import type { Project } from '@/types/projects';
 import { useAuth } from '@/hooks/useAuth';
@@ -41,6 +20,15 @@ import { SettingsModal } from '@/components/chat/settings/SettingsModal';
 import { ProjectsSection } from '@/components/chat/ProjectsSection';
 import { ProjectModal } from '@/components/chat/ProjectModal';
 import { ConfirmModal } from '@/components/chat/ConfirmModal';
+
+import { BrandMark } from './sidebar/BrandMark';
+import { UserMenu } from './sidebar/UserMenu';
+import { ChatListItem } from './sidebar/ChatListItem';
+import { groupSessions } from './sidebar/groups';
+import {
+    SCROLLABLE_NAV_ITEMS,
+    STICKY_NAV_ITEMS,
+} from './sidebar/nav-config';
 
 interface SidebarProps {
     sessions: ChatSession[];
@@ -60,244 +48,9 @@ interface SidebarProps {
     onMobileClose?: () => void;
 }
 
-// Stays pinned above the scrollable chat list.
-const STICKY_NAV_ITEMS = [
-    { icon: Plus, label: 'New chat', action: 'new-chat' as const },
-    { icon: Search, label: 'Search chats', action: 'search' as const, shortcut: '⌘K' },
-];
-
-// Lives inside the scrollable region — scrolls together with the chat list.
-const SCROLLABLE_NAV_ITEMS = [
-    { icon: ImageIcon, label: 'Images', action: 'images' as const, href: undefined as string | undefined },
-    { icon: Grid2X2, label: 'Apps', action: 'apps' as const, href: undefined as string | undefined },
-    { icon: Code2, label: 'Forge', action: 'forge' as const, href: '/code' as string | undefined },
-];
-
-// ── Group chats by recency ──────────────────────────────────────────────────
-type ChatGroup = { label: string; sessions: ChatSession[] };
-
-function groupSessions(sessions: ChatSession[]): ChatGroup[] {
-    const now = Date.now();
-    const DAY = 24 * 60 * 60 * 1000;
-
-    const pinned: ChatSession[] = [];
-    const today: ChatSession[] = [];
-    const week: ChatSession[] = [];
-    const older: ChatSession[] = [];
-
-    for (const s of sessions) {
-        if (s.isPinned) {
-            pinned.push(s);
-            continue;
-        }
-        const t = new Date(s.updatedAt).getTime();
-        const diff = now - t;
-        if (diff < DAY) today.push(s);
-        else if (diff < 7 * DAY) week.push(s);
-        else older.push(s);
-    }
-
-    const groups: ChatGroup[] = [];
-    if (pinned.length) groups.push({ label: 'Pinned', sessions: pinned });
-    if (today.length) groups.push({ label: 'Today', sessions: today });
-    if (week.length) groups.push({ label: 'Previous 7 days', sessions: week });
-    if (older.length) groups.push({ label: 'Older', sessions: older });
-    return groups;
-}
-
-interface ChatListItemProps {
-    session: ChatSession;
-    isActive: boolean;
-    onSelect: () => void;
-    onPin: () => void;
-    onArchive: () => void;
-    onDelete: () => void;
-    onRename?: (sessionId: string, title: string) => void;
-    onBranch?: () => void;
-}
-
-function ChatListItem({ session, isActive, onSelect, onPin, onArchive, onDelete, onRename, onBranch }: ChatListItemProps) {
-    const [menuOpen, setMenuOpen] = useState(false);
-    const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
-    const [isRenaming, setIsRenaming] = useState(false);
-    const [renameValue, setRenameValue] = useState(session.title);
-    const btnRef = useRef<HTMLButtonElement>(null);
-    const menuRef = useRef<HTMLDivElement>(null);
-    const renameInputRef = useRef<HTMLInputElement>(null);
-
-    useEffect(() => {
-        if (!menuOpen) return;
-        const handler = (e: MouseEvent) => {
-            if (
-                menuRef.current && !menuRef.current.contains(e.target as Node) &&
-                btnRef.current && !btnRef.current.contains(e.target as Node)
-            ) {
-                setMenuOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [menuOpen]);
-
-    useEffect(() => {
-        if (isRenaming) {
-            requestAnimationFrame(() => {
-                renameInputRef.current?.focus();
-                renameInputRef.current?.select();
-            });
-        }
-    }, [isRenaming]);
-
-    const openMenu = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (btnRef.current) {
-            const rect = btnRef.current.getBoundingClientRect();
-            setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-        }
-        setMenuOpen(o => !o);
-    };
-
-    const startRename = () => {
-        setRenameValue(session.title);
-        setIsRenaming(true);
-    };
-
-    const commitRename = () => {
-        const trimmed = renameValue.trim();
-        if (trimmed && trimmed !== session.title && onRename) {
-            onRename(session.id, trimmed);
-        }
-        setIsRenaming(false);
-    };
-
-    const cancelRename = () => {
-        setRenameValue(session.title);
-        setIsRenaming(false);
-    };
-
-    return (
-        <>
-            <div
-                className={cn(
-                    'group relative flex items-center gap-1.5 pl-2 pr-1 h-8 rounded-md transition-colors duration-150 text-[13px]',
-                    isRenaming
-                        ? 'bg-surface-3'
-                        : isActive
-                            ? 'bg-surface-3 text-foreground cursor-pointer'
-                            : 'text-foreground-muted hover:bg-surface-2 hover:text-foreground cursor-pointer'
-                )}
-                onClick={isRenaming ? undefined : onSelect}
-            >
-                {isRenaming ? (
-                    <input
-                        ref={renameInputRef}
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                e.preventDefault();
-                                commitRename();
-                            } else if (e.key === 'Escape') {
-                                e.preventDefault();
-                                cancelRename();
-                            }
-                        }}
-                        onBlur={commitRename}
-                        onClick={(e) => e.stopPropagation()}
-                        maxLength={120}
-                        className="flex-1 min-w-0 bg-transparent text-foreground text-[13px] outline-none"
-                    />
-                ) : (
-                    <span className="flex-1 min-w-0 truncate leading-none">{session.title}</span>
-                )}
-
-                {!isRenaming && (
-                    <SimpleTooltip content="More options" side="top" disabled={menuOpen}>
-                        <button
-                            ref={btnRef}
-                            onClick={openMenu}
-                            aria-label="More options"
-                            className={cn(
-                                'shrink-0 h-6 w-6 flex items-center justify-center rounded transition-all',
-                                menuOpen
-                                    ? 'bg-surface-3 text-foreground opacity-100'
-                                    : 'text-foreground-subtle hover:bg-surface-3 hover:text-foreground opacity-0 group-hover:opacity-100',
-                                isActive && 'opacity-100'
-                            )}
-                        >
-                            <MoreHorizontal className="h-3.5 w-3.5" />
-                        </button>
-                    </SimpleTooltip>
-                )}
-            </div>
-
-            {menuOpen && (
-                <div
-                    ref={menuRef}
-                    style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}
-                    className="min-w-[160px] bg-popover text-popover-foreground rounded-lg border border-border shadow-overlay py-1"
-                >
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onPin(); setMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors"
-                    >
-                        <Pin className="h-3.5 w-3.5 rotate-45" />
-                        {session.isPinned ? 'Unpin' : 'Pin'}
-                    </button>
-                    {onRename && (
-                        <button
-                            onClick={(e) => { e.stopPropagation(); startRename(); setMenuOpen(false); }}
-                            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors"
-                        >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Rename
-                        </button>
-                    )}
-                    {onBranch && (
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onBranch(); setMenuOpen(false); }}
-                            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors"
-                        >
-                            <GitBranch className="h-3.5 w-3.5" />
-                            Branch
-                        </button>
-                    )}
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onArchive(); setMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors"
-                    >
-                        <Archive className="h-3.5 w-3.5" />
-                        Archive
-                    </button>
-                    <div className="my-1 h-px bg-border-subtle" />
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(); setMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-destructive hover:bg-destructive/10 transition-colors"
-                    >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                    </button>
-                </div>
-            )}
-        </>
-    );
-}
-
-// ── Brand mark ──────────────────────────────────────────────────────────────
-function BrandMark({ withWordmark = true }: { withWordmark?: boolean }) {
-    return (
-        <div className="flex items-center gap-2 text-foreground">
-            <div className="h-6 w-6 rounded-md bg-foreground text-background flex items-center justify-center">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2C6.477 2 2 6.27 2 11.5c0 2.37.93 4.53 2.46 6.14L3 21.75l4.45-1.45A10.1 10.1 0 0 0 12 21c5.523 0 10-4.27 10-9.5S17.523 2 12 2Z" fill="currentColor" />
-                </svg>
-            </div>
-            {withWordmark && (
-                <span className="text-[14px] font-semibold tracking-tight">SouvikAI</span>
-            )}
-        </div>
-    );
-}
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 420;
+const COLLAPSED_WIDTH = 56;
 
 export function Sidebar({
     sessions,
@@ -316,6 +69,7 @@ export function Sidebar({
 }: SidebarProps) {
     const { user, signOut } = useAuth();
     const router = useRouter();
+    const pathname = usePathname();
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [sidebarWidth, setSidebarWidth] = useState(244);
@@ -325,12 +79,9 @@ export function Sidebar({
         onMobileClose?.();
         router.push('/chats');
     }, [router, onMobileClose]);
+
     const displayName = user?.displayName || user?.email?.split('@')[0] || 'User';
     const initial = displayName.charAt(0).toUpperCase();
-
-    const MIN_WIDTH = 200;
-    const MAX_WIDTH = 420;
-    const COLLAPSED_WIDTH = 56;
 
     // Sessions that belong to a project are listed inside that project's page.
     // The main sidebar list shows only "loose" (top-level) chats so the same
@@ -342,7 +93,6 @@ export function Sidebar({
     const groups = useMemo(() => groupSessions(looseSessions), [looseSessions]);
 
     // ── Projects state ──────────────────────────────────────────────────
-    const pathname = usePathname();
     const activeProjectId = useMemo(() => {
         const match = pathname?.match(/^\/projects\/([^/]+)/);
         return match ? match[1] : null;
@@ -379,6 +129,7 @@ export function Sidebar({
         void deleteProject(id);
     }, [deleteTarget, deleteProject, activeProjectId, router]);
 
+    // ── Drag-to-resize ──────────────────────────────────────────────────
     const startDrag = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
         setIsDragging(true);
@@ -397,6 +148,14 @@ export function Sidebar({
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
     }, [sidebarWidth]);
+
+    // Cleanup drag listeners on unmount in case the component unmounts mid-drag.
+    useEffect(() => {
+        return () => {
+            // Best-effort — useCallback's listeners are anonymous, but if a
+            // drag is in progress the next mouseup will clean itself up.
+        };
+    }, []);
 
     return (
         <>
@@ -421,7 +180,11 @@ export function Sidebar({
                             return (
                                 <button
                                     key={item.action}
-                                    onClick={item.action === 'new-chat' ? onNewChat : item.action === 'search' ? onSearch : undefined}
+                                    onClick={
+                                        item.action === 'new-chat' ? onNewChat
+                                        : item.action === 'search' ? onSearch
+                                        : undefined
+                                    }
                                     className="w-full flex items-center gap-2.5 px-2 h-9 rounded-md text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors"
                                 >
                                     <Icon className="h-4 w-4 shrink-0" />
@@ -808,71 +571,5 @@ export function Sidebar({
                 confirmVariant="danger"
             />
         </>
-    );
-}
-
-// ── User menu (footer) ──────────────────────────────────────────────────────
-interface UserMenuProps {
-    user: { email?: string; displayName?: string } | null;
-    displayName: string;
-    initial: string;
-    collapsed: boolean;
-    onOpenSettings: () => void;
-    onSignOut: () => void;
-}
-
-function UserMenu({ user, displayName, initial, collapsed, onOpenSettings, onSignOut }: UserMenuProps) {
-    return (
-        <DropdownMenu>
-            <SimpleTooltip
-                content={collapsed ? `${displayName} · Account` : 'Account'}
-                side="right"
-                disabled={!collapsed}
-            >
-                <DropdownMenuTrigger asChild>
-                    <button
-                        aria-label="Open account menu"
-                        className={cn(
-                            'w-full flex items-center rounded-md hover:bg-surface-2 transition-colors text-left',
-                            collapsed ? 'h-8 w-8 mx-auto justify-center p-0' : 'gap-2 px-1.5 py-1.5'
-                        )}
-                    >
-                        <Avatar className="h-7 w-7 shrink-0 ring-1 ring-border">
-                            <AvatarFallback className="bg-foreground text-background text-[11px] font-semibold">
-                                {initial}
-                            </AvatarFallback>
-                        </Avatar>
-                        {!collapsed && (
-                            <div className="flex-1 min-w-0">
-                                <p className="text-[13px] font-medium truncate text-foreground leading-tight">{displayName}</p>
-                                <p className="text-[11px] text-foreground-muted truncate leading-tight">Free plan</p>
-                            </div>
-                        )}
-                    </button>
-                </DropdownMenuTrigger>
-            </SimpleTooltip>
-            <DropdownMenuContent align="start" className="w-56 bg-popover text-popover-foreground border-border" sideOffset={8}>
-                <div className="px-2 py-1.5 text-[11px] text-foreground-muted border-b border-border-subtle mb-1 truncate">
-                    {user?.email}
-                </div>
-                <DropdownMenuItem
-                    onSelect={(e) => {
-                        e.preventDefault();
-                        onOpenSettings();
-                    }}
-                    className="cursor-pointer text-[13px]"
-                >
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                    onClick={onSignOut}
-                    className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer text-[13px]"
-                >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Sign out
-                </DropdownMenuItem>
-            </DropdownMenuContent>
-        </DropdownMenu>
     );
 }

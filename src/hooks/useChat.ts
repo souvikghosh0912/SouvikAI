@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -9,12 +8,35 @@ import { Message, ChatSession, ChatState, AIModel } from '@/types/chat';
 import type { Attachment, AttachmentPayload, MessageAttachment } from '@/types/attachments';
 import { useAuth } from './useAuth';
 import { useChatPreferences } from './useChatPreferences';
+import { MAX_INPUT_CHARS } from '@/lib/limits';
+import {
+    mapAndSortSessionList,
+    sortSessionsByPinAndRecency,
+} from './chat/session-mapper';
+import { composeCustomSystemPrompt } from './chat/personalization';
+import {
+    createSession,
+    deleteAssistantMessageAsync,
+    deleteSession as dbDeleteSession,
+    fetchSessionMessages,
+    fetchSessionMeta,
+    fetchUserSessions,
+    insertAssistantMessage,
+    insertUserMessageAsync,
+    setSessionTitleAsync,
+    updateSessionArchived,
+    updateSessionPinned,
+    updateSessionTitle,
+} from './chat/db-actions';
+import { runChatCompletion } from './chat/send-stream';
+import {
+    buildPlaceholderTitle,
+    generateAndApplyTitle,
+    stripThinkBlocks,
+} from './chat/title';
 
 // Singleton client
 const supabase = createClient();
-
-/** Hard limit: ~10k tokens at 4 chars/token. Prevents quota bypass via huge inputs. */
-const MAX_INPUT_CHARS = 40_000;
 
 export function useChat() {
     const { user } = useAuth();
@@ -27,6 +49,7 @@ export function useChat() {
     // without needing selectedModelId in its dependency array (which would
     // cause it to be re-created on every model change and risk race conditions).
     selectedModelIdRef.current = selectedModelId;
+
     const [state, setState] = useState<ChatState>({
         messages: [],
         isLoading: false,
@@ -42,6 +65,7 @@ export function useChat() {
      * uses it to render the "Branched from <title>" divider at the top.
      */
     const [currentSessionBranchedFromTitle, setCurrentSessionBranchedFromTitle] = useState<string | null>(null);
+
     const abortControllerRef = useRef<AbortController | null>(null);
     const loadingUserIdRef = useRef<string | null>(null);
     /**
@@ -51,27 +75,7 @@ export function useChat() {
      */
     const pendingProjectIdRef = useRef<string | null>(null);
 
-    const mapSessionData = useCallback((data: any[]): ChatSession[] => {
-        return data
-            .filter((s) => !s.is_archived)
-            .map((s) => ({
-                id: s.id,
-                userId: s.user_id,
-                title: s.title,
-                createdAt: new Date(s.created_at),
-                updatedAt: new Date(s.updated_at),
-                isPinned: s.is_pinned ?? false,
-                isArchived: s.is_archived ?? false,
-                projectId: s.project_id ?? null,
-                branchedFromSessionId: s.branched_from_session_id ?? null,
-                branchedFromTitle: s.branched_from_title ?? null,
-            }))
-            .sort((a, b) => {
-                if (a.isPinned && !b.isPinned) return -1;
-                if (!a.isPinned && b.isPinned) return 1;
-                return b.updatedAt.getTime() - a.updatedAt.getTime();
-            });
-    }, []);
+    // ── Loaders ──────────────────────────────────────────────────────────────
 
     const loadSessions = useCallback(async (userId: string) => {
         // Prevent duplicate loading
@@ -79,60 +83,33 @@ export function useChat() {
         loadingUserIdRef.current = userId;
 
         try {
-            // First check if sessions were preloaded
+            // Hit the preloader cache first (populated by /app/layout).
             const cachedPromise = getCachedSessionsPromise(userId);
             if (cachedPromise) {
                 const data = await cachedPromise;
-                setSessions(mapSessionData(data));
+                setSessions(mapAndSortSessionList(data));
                 setSessionsLoaded(true);
                 return;
             }
 
-            // Otherwise fetch directly
-            const { data, error } = await supabase
-                .from('chat_sessions')
-                .select('*')
-                .eq('user_id', userId)
-                .order('updated_at', { ascending: false });
-
-            if (!error && data) {
-                setSessions(mapSessionData(data));
+            const data = await fetchUserSessions(supabase, userId);
+            if (data) {
+                setSessions(mapAndSortSessionList(data));
                 setSessionsLoaded(true);
             }
         } finally {
             loadingUserIdRef.current = null;
         }
-    }, [sessionsLoaded, mapSessionData]);
+    }, [sessionsLoaded]);
 
     const loadMessages = useCallback(async (sessionId: string) => {
-        const { data, error } = await supabase
-            .from('chat_messages')
-            .select('*')
-            .eq('session_id', sessionId)
-            .order('created_at', { ascending: true });
-
-        if (!error && data) {
-            const messages: Message[] = (data as any[]).map((m) => ({
-                id: m.id,
-                sessionId: m.session_id,
-                userId: m.user_id,
-                role: m.role,
-                content: m.content,
-                createdAt: new Date(m.created_at),
-                attachments: Array.isArray(m.attachments) ? (m.attachments as MessageAttachment[]) : undefined,
-            }));
+        const messages = await fetchSessionMessages(supabase, sessionId);
+        if (messages) {
             setState((prev) => ({ ...prev, messages, currentSessionId: sessionId }));
         }
-
-        // Fetch session-level metadata used by the conversation view:
-        // archive banner + "Branched from …" divider.
-        const { data: sessionData } = await (supabase as any)
-            .from('chat_sessions')
-            .select('is_archived, branched_from_title')
-            .eq('id', sessionId)
-            .single();
-        setIsCurrentSessionArchived(sessionData?.is_archived ?? false);
-        setCurrentSessionBranchedFromTitle(sessionData?.branched_from_title ?? null);
+        const meta = await fetchSessionMeta(supabase, sessionId);
+        setIsCurrentSessionArchived(meta.isArchived);
+        setCurrentSessionBranchedFromTitle(meta.branchedFromTitle);
     }, []);
 
     // Internal: creates a session in the DB. Called by sendMessage on first message.
@@ -144,37 +121,12 @@ export function useChat() {
         const projectId = pendingProjectIdRef.current;
         pendingProjectIdRef.current = null;
 
-        const insertPayload: { user_id: string; title: string; project_id?: string | null } = {
-            user_id: user.id,
-            title: 'New Chat',
-        };
-        if (projectId) insertPayload.project_id = projectId;
+        const session = await createSession(supabase, user.id, projectId);
+        if (!session) return null;
 
-        const result: any = await (supabase as any)
-            .from('chat_sessions')
-            .insert(insertPayload)
-            .select()
-            .single();
-
-        if (!result.error && result.data) {
-            const data = result.data;
-            const newSession: ChatSession = {
-                id: data.id,
-                userId: data.user_id,
-                title: data.title,
-                createdAt: new Date(data.created_at),
-                updatedAt: new Date(data.updated_at),
-                isPinned: false,
-                isArchived: false,
-                projectId: data.project_id ?? null,
-                branchedFromSessionId: null,
-                branchedFromTitle: null,
-            };
-            setSessions((prev) => [newSession, ...prev]);
-            setState((prev) => ({ ...prev, currentSessionId: data.id }));
-            return data.id;
-        }
-        return null;
+        setSessions((prev) => [session, ...prev]);
+        setState((prev) => ({ ...prev, currentSessionId: session.id }));
+        return session.id;
     }, [user]);
 
     // Public: resets the UI to a blank slate and aborts any in-flight stream.
@@ -203,6 +155,8 @@ export function useChat() {
     const selectSession = useCallback(async (sessionId: string) => {
         await loadMessages(sessionId);
     }, [loadMessages]);
+
+    // ── Sending & streaming ─────────────────────────────────────────────────
 
     const sendMessage = useCallback(async (content: string, attachments: Attachment[] = [], tool?: string) => {
         if (!user) return;
@@ -258,16 +212,12 @@ export function useChat() {
             error: null,
         }));
 
-        // Save user message (fire and forget to reduce latency)
-        (supabase as any).from('chat_messages').insert({
+        insertUserMessageAsync(supabase, {
             id: userMessage.id,
-            session_id: sessionId,
-            user_id: user.id,
-            role: 'user',
+            sessionId,
+            userId: user.id,
             content,
             attachments: messageAttachments.length > 0 ? messageAttachments : null,
-        }).then(({ error }: any) => {
-            if (error) console.error('Failed to save message:', error);
         });
 
         // On the first message, set a quick placeholder title so the sidebar
@@ -275,13 +225,11 @@ export function useChat() {
         // once the first response stream finishes.
         const isFirstMessage = state.messages.length === 0;
         if (isFirstMessage) {
-            const placeholder = content.slice(0, 40) + (content.length > 40 ? '…' : '');
+            const placeholder = buildPlaceholderTitle(content);
             setSessions((prev) =>
                 prev.map((s) => (s.id === sessionId ? { ...s, title: placeholder } : s))
             );
-            // DB write is also fire-and-forget — AI title will overwrite it shortly
-            ;(supabase as any).from('chat_sessions').update({ title: placeholder }).eq('id', sessionId)
-                .then(({ error }: any) => { if (error) console.error('Failed to set placeholder title:', error); });
+            setSessionTitleAsync(supabase, sessionId, placeholder);
         }
 
         // Create abort controller
@@ -296,7 +244,7 @@ export function useChat() {
                 ...prev.messages,
                 {
                     id: assistantId,
-                    sessionId,
+                    sessionId: sessionId!,
                     userId: user.id,
                     role: 'assistant',
                     content: '',
@@ -306,183 +254,56 @@ export function useChat() {
         }));
 
         try {
-            // ── Compose personalization block from current preferences ────────
-            // Read preferences at call-time (not at hook creation) via the hook
-            // value which is already reactive. The block is plain English so any
-            // model can understand and follow it.
-            const p = preferences;
-            const lines: string[] = [];
+            const customSystemPrompt = composeCustomSystemPrompt(preferences);
 
-            if (p.toneStyle !== 'default') {
-                const toneMap: Record<string, string> = {
-                    formal:    'Use a formal, professional tone.',
-                    casual:    'Use a casual, conversational tone.',
-                    technical: 'Use a precise, technical tone with domain-specific terminology.',
-                    friendly:  'Use a friendly, approachable tone.',
-                };
-                lines.push(toneMap[p.toneStyle] ?? '');
-            }
-            if (p.warmth !== 'default')       lines.push(p.warmth === 'more'    ? 'Be warm and personal in your responses.' : 'Keep responses professional and impersonal.');
-            if (p.enthusiasm !== 'default')   lines.push(p.enthusiasm === 'more' ? 'Be enthusiastic and energetic.' : 'Be measured and understated in tone.');
-            if (p.headersAndLists !== 'default') lines.push(p.headersAndLists === 'more' ? 'Use markdown headers and bullet lists generously to structure your answers.' : 'Avoid markdown headers and bullet lists; prefer flowing prose.');
-            if (p.emoji !== 'default')        lines.push(p.emoji === 'more'     ? 'Include relevant emoji throughout your responses.' : 'Do not use emoji in your responses.');
-
-            const personalizationBlock = lines.filter(Boolean).join(' ');
-            const customSystemPrompt = [
-                p.isSystemPromptSafe && p.systemPrompt ? p.systemPrompt : '',
-                personalizationBlock,
-            ].filter(Boolean).join('\n\n');
-
-            const runCompletion = async (currentTool?: string, currentSearchResults?: any[], currentSearchQuery?: string) => {
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sessionId,
-                        messageId: userMessage.id,
-                        content,
-                        attachments: attachmentPayloads,
-                        model: selectedModelIdRef.current === 'auto' ? 'souvik-ai-1' : selectedModelIdRef.current,
-                        systemPrompt: customSystemPrompt,
-                        tool: currentTool,
-                        searchResults: currentSearchResults,
-                        searchResultsQuery: currentSearchQuery,
-                    }),
-                    signal: abortControllerRef.current?.signal,
-                });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Failed to get response');
-                }
-
-                const reader = response.body?.getReader();
-                if (!reader) throw new Error('No response body');
-
-                const decoder = new TextDecoder();
-                let assistantContent = '';
-                let searchIntercepted = false;
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    const chunk = decoder.decode(value);
-                    assistantContent += chunk;
-
-                    // ── Client-side Tool Coordination ────────────────────────────────
-                    if (currentTool === 'searchWeb' && !currentSearchResults && !searchIntercepted) {
-                        if (assistantContent.includes('<search')) {
-                            const searchMatch = assistantContent.match(/<search>([\s\S]*?)<\/search>/);
-                            if (searchMatch) {
-                                searchIntercepted = true;
-                                const query = searchMatch[1].trim();
-                                
-                                // 1. Abort the current stream since we are pivoting to a search
-                                await reader.cancel();
-                                
-                                // 2. Flip UI to "Searching the web..." shimmer and clear the <search> tags
-                                setState((prev) => ({
-                                    ...prev,
-                                    messages: prev.messages.map((m) =>
-                                        m.id === assistantId
-                                            ? { ...m, content: '', webSearch: { query, status: 'searching', results: [] } }
-                                            : m
-                                    ),
-                                }));
-
-                                // 3. Perform the web search (client coordinates this so Vercel doesn't timeout)
-                                try {
-                                    const res = await fetch(`/api/tools/web-search?q=${encodeURIComponent(query)}`);
-                                    const data = await res.json();
-                                    
-                                    // 4. Update UI to "done" with source cards
-                                    setState((prev) => ({
-                                        ...prev,
-                                        messages: prev.messages.map((m) =>
-                                            m.id === assistantId
-                                                ? { ...m, webSearch: { query, status: 'done', results: data.results || [] } }
-                                                : m
-                                        ),
-                                    }));
-
-                                    // 5. Kick off a second request to the model with the search results.
-                                    //    Return its final content so the outer caller (and the DB save)
-                                    //    use the real answer, not the raw "<search>…</search>" placeholder.
-                                    return await runCompletion(undefined, data.results || [], query);
-                                } catch (e) {
-                                    console.error('[Chat] Search failed, falling back:', e);
-                                    return await runCompletion(undefined, [], query);
-                                }
-                            }
-                            // Still streaming the <search> tag, don't show it to the user yet
-                            continue;
-                        }
-                    }
-
-                    // Safety net: strip any <search>…</search> tags the model
-                    // may emit on the second pass (after we've already run the
-                    // search). Without this, the raw tag leaks into the
-                    // visible answer and gets persisted to the DB.
-                    const visibleContent = assistantContent.replace(
-                        /<search>[\s\S]*?<\/search>/gi,
-                        ''
-                    );
-
+            const finalContent = await runChatCompletion({
+                sessionId,
+                userMessageId: userMessage.id,
+                content,
+                attachments: attachmentPayloads,
+                model: selectedModelIdRef.current,
+                customSystemPrompt,
+                tool,
+                signal: abortControllerRef.current.signal,
+                assistantId,
+                onMutateAssistant: (mutate) => {
+                    setState((prev) => ({
+                        ...prev,
+                        messages: prev.messages.map((m) => (m.id === assistantId ? mutate(m) : m)),
+                    }));
+                },
+                onAssistantContent: (content) => {
                     setState((prev) => ({
                         ...prev,
                         messages: prev.messages.map((m) =>
-                            m.id === assistantId ? { ...m, content: visibleContent } : m
+                            m.id === assistantId ? { ...m, content } : m
                         ),
                     }));
-                }
-
-                // Return the cleaned content so the DB save and the outer
-                // caller never see the placeholder tag.
-                return assistantContent.replace(/<search>[\s\S]*?<\/search>/gi, '').trim();
-            };
-
-            const finalContent = await runCompletion(tool);
-
-            // Save assistant message using the final accumulated content
-            await (supabase as any).from('chat_messages').insert({
-                id: assistantId,
-                session_id: sessionId,
-                user_id: user.id,
-                role: 'assistant',
-                content: finalContent,
+                },
             });
 
-
+            await insertAssistantMessage(supabase, {
+                id: assistantId,
+                sessionId,
+                userId: user.id,
+                content: finalContent,
+            });
 
             // ── Generate AI title after the first exchange ────────────────────
             // Fire-and-forget: runs after the stream is fully complete so it
             // never adds latency to the user's first message. The sidebar title
             // updates silently when the response arrives.
             if (isFirstMessage && finalContent) {
-                fetch('/api/chat/title', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sessionId,
-                        userMessage: content,
-                        assistantMessage: finalContent
-                            // Strip <think>…</think> tags before sending to the title model
-                            .replace(/<think>[\s\S]*?<\/think>/gi, '')
-                            .trim(),
-                    }),
-                })
-                    .then((res) => res.ok ? res.json() : null)
-                    .then((data) => {
-                        if (data?.title) {
-                            setSessions((prev) =>
-                                prev.map((s) =>
-                                    s.id === sessionId ? { ...s, title: data.title } : s
-                                )
-                            );
-                        }
-                    })
-                    .catch(() => { /* title failure is silent */ });
+                generateAndApplyTitle({
+                    sessionId,
+                    userMessage: content,
+                    assistantMessage: stripThinkBlocks(finalContent),
+                    onTitleResolved: (title) => {
+                        setSessions((prev) =>
+                            prev.map((s) => (s.id === sessionId ? { ...s, title } : s))
+                        );
+                    },
+                });
             }
 
             setState((prev) => ({ ...prev, isLoading: false }));
@@ -501,11 +322,10 @@ export function useChat() {
 
             if ((error as Error).name !== 'AbortError') {
                 // Save the error message as an assistant response so it persists in the chat history
-                await (supabase as any).from('chat_messages').insert({
+                await insertAssistantMessage(supabase, {
                     id: assistantId,
-                    session_id: sessionId,
-                    user_id: user.id,
-                    role: 'assistant',
+                    sessionId,
+                    userId: user.id,
                     content: errorMessage,
                 });
             }
@@ -545,20 +365,16 @@ export function useChat() {
             ...prev,
             messages: prev.messages.filter((m) => m.id !== assistantMessageId),
         }));
-        (supabase as any)
-            .from('chat_messages')
-            .delete()
-            .eq('id', assistantMessageId)
-            .then(({ error }: any) => {
-                if (error) console.error('Failed to delete assistant message for regeneration:', error);
-            });
+        deleteAssistantMessageAsync(supabase, assistantMessageId);
 
         // Re-send the same user content — sendMessage will create a new assistant bubble
         await sendMessage(userMessage.content);
     }, [state.messages, sendMessage]);
 
+    // ── Session mutations ───────────────────────────────────────────────────
+
     const deleteSession = useCallback(async (sessionId: string) => {
-        await supabase.from('chat_sessions').delete().eq('id', sessionId);
+        await dbDeleteSession(supabase, sessionId);
         setSessions((prev) => prev.filter((s) => s.id !== sessionId));
         if (state.currentSessionId === sessionId) {
             setState((prev) => ({ ...prev, messages: [], currentSessionId: null }));
@@ -571,26 +387,16 @@ export function useChat() {
         const session = sessions.find(s => s.id === sessionId);
         if (!session) return;
         const newPinned = !session.isPinned;
-        await (supabase as any)
-            .from('chat_sessions')
-            .update({ is_pinned: newPinned })
-            .eq('id', sessionId);
+        await updateSessionPinned(supabase, sessionId, newPinned);
         setSessions((prev) =>
-            prev
-                .map((s) => s.id === sessionId ? { ...s, isPinned: newPinned } : s)
-                .sort((a, b) => {
-                    if (a.isPinned && !b.isPinned) return -1;
-                    if (!a.isPinned && b.isPinned) return 1;
-                    return b.updatedAt.getTime() - a.updatedAt.getTime();
-                })
+            sortSessionsByPinAndRecency(
+                prev.map((s) => s.id === sessionId ? { ...s, isPinned: newPinned } : s),
+            ),
         );
     }, [sessions]);
 
     const archiveSession = useCallback(async (sessionId: string) => {
-        await (supabase as any)
-            .from('chat_sessions')
-            .update({ is_archived: true })
-            .eq('id', sessionId);
+        await updateSessionArchived(supabase, sessionId, true);
         setSessions((prev) => prev.filter((s) => s.id !== sessionId));
         if (state.currentSessionId === sessionId) {
             setState((prev) => ({ ...prev, messages: [], currentSessionId: null }));
@@ -643,15 +449,10 @@ export function useChat() {
             prev.map((s) => (s.id === sessionId ? { ...s, title: trimmed } : s))
         );
 
-        const { error } = await (supabase as any)
-            .from('chat_sessions')
-            .update({ title: trimmed })
-            .eq('id', sessionId);
-
-        if (error) {
-            console.error('Failed to rename session:', error);
-        }
+        await updateSessionTitle(supabase, sessionId, trimmed);
     }, []);
+
+    // ── Models ──────────────────────────────────────────────────────────────
 
     const loadModels = useCallback(async () => {
         try {
@@ -667,6 +468,8 @@ export function useChat() {
             console.error('Failed to load models:', error);
         }
     }, [selectedModelId]);
+
+    // ── Lifecycle ───────────────────────────────────────────────────────────
 
     // Load sessions when user becomes available
     useEffect(() => {
