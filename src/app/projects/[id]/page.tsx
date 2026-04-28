@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -9,28 +9,45 @@ import {
     Folder,
     Loader2,
     Menu,
-    MessageSquare,
     MoreHorizontal,
     Pencil,
-    Plus,
     Trash2,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useProjects } from '@/hooks/useProjects';
 import { createClient } from '@/lib/supabase/client';
 import { ChatAccentProvider } from '@/components/chat/ChatAccentProvider';
-import { Sidebar, ConfirmModal, ProjectModal } from '@/components/chat';
-import { Button, SimpleTooltip, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui';
-import { cn } from '@/lib/utils';
+import {
+    Sidebar,
+    ConfirmModal,
+    ProjectModal,
+    ChatInput,
+    ChatListView,
+} from '@/components/chat';
+import {
+    Button,
+    SimpleTooltip,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui';
 import type { Project } from '@/types/projects';
+import type { ChatSession } from '@/types/chat';
+import type { Attachment } from '@/types/attachments';
 
-interface ProjectChat {
-    id: string;
-    title: string;
-    updatedAt: Date;
-}
+// sessionStorage key used to hand off a "first message" from the project
+// page's empty-state composer to the home page, which actually creates the
+// session and starts streaming. Scoping by project id keeps stale payloads
+// from leaking between different projects on the same tab.
+const PENDING_KEY = (projectId: string) => `souvik:pending-project-msg:${projectId}`;
 
 const supabase = createClient();
+
+interface PendingDeleteChat {
+    sessionId: string;
+    title: string;
+}
 
 export default function ProjectPage() {
     const params = useParams<{ id: string }>();
@@ -38,19 +55,24 @@ export default function ProjectPage() {
     const router = useRouter();
     const { user, isLoading: authLoading, isAuthenticated } = useAuth();
 
-    const { projects, isLoaded: projectsLoaded, renameProject, deleteProject } = useProjects();
+    const {
+        projects,
+        isLoaded: projectsLoaded,
+        renameProject,
+        deleteProject,
+    } = useProjects();
 
     const [project, setProject] = useState<Project | null>(null);
     const [projectError, setProjectError] = useState<string | null>(null);
-    const [chats, setChats] = useState<ProjectChat[]>([]);
+    const [chats, setChats] = useState<ChatSession[]>([]);
     const [chatsLoaded, setChatsLoaded] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     const [renameOpen, setRenameOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
-    const [pendingDeleteChatId, setPendingDeleteChatId] = useState<string | null>(null);
+    const [pendingDeleteChat, setPendingDeleteChat] = useState<PendingDeleteChat | null>(null);
 
-    // ── Auth gate ──────────────────────────────────────────────────────────
+    // ── Auth gate ─────────────────────────────────────────────────────────
     useEffect(() => {
         if (!authLoading && !isAuthenticated) router.push('/signin');
     }, [authLoading, isAuthenticated, router]);
@@ -59,7 +81,6 @@ export default function ProjectPage() {
     useEffect(() => {
         if (!projectId || !user) return;
 
-        // Try the cached list first (instant) before issuing a network call.
         const cached = projects.find((p) => p.id === projectId);
         if (cached) {
             setProject(cached);
@@ -67,7 +88,6 @@ export default function ProjectPage() {
             return;
         }
 
-        // Wait until useProjects has finished loading before declaring "not found".
         if (!projectsLoaded) return;
 
         let cancelled = false;
@@ -92,51 +112,52 @@ export default function ProjectPage() {
             });
             setProjectError(null);
         })();
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+        };
     }, [projectId, user, projects, projectsLoaded]);
 
-    // ── Load chats for the project ─────────────────────────────────────────
+    // ── Load FULL chat sessions for the project (incl. pinned/archived) ───
+    // ChatListView needs is_pinned and is_archived to render filters and
+    // pin indicators correctly, so we select * here instead of just titles.
     const loadChats = useCallback(async () => {
         if (!projectId || !user) return;
         const { data, error } = await supabase
             .from('chat_sessions')
-            .select('id, title, updated_at, is_archived')
+            .select('*')
             .eq('project_id', projectId)
             .eq('user_id', user.id)
             .order('updated_at', { ascending: false });
 
         if (!error && data) {
-            const mapped: ProjectChat[] = (data as any[])
-                .filter((s) => !s.is_archived)
-                .map((s) => ({
-                    id: s.id,
-                    title: s.title,
-                    updatedAt: new Date(s.updated_at),
-                }));
+            const mapped: ChatSession[] = (data as any[]).map((s) => ({
+                id: s.id,
+                userId: s.user_id,
+                title: s.title || 'Untitled chat',
+                createdAt: new Date(s.created_at),
+                updatedAt: new Date(s.updated_at),
+                isPinned: s.is_pinned ?? false,
+                isArchived: s.is_archived ?? false,
+                projectId: s.project_id ?? null,
+            }));
             setChats(mapped);
         }
         setChatsLoaded(true);
     }, [projectId, user]);
 
-    useEffect(() => { void loadChats(); }, [loadChats]);
+    useEffect(() => {
+        void loadChats();
+    }, [loadChats]);
 
-    // ── Actions ────────────────────────────────────────────────────────────
-    const handleNewChat = useCallback(() => {
-        if (!projectId) return;
-        // Hand off to the home page; it consumes `?project=` and starts a
-        // new chat assigned to this project.
-        router.push(`/?project=${projectId}`);
-    }, [projectId, router]);
-
-    const handleSelectChat = useCallback((chatId: string) => {
-        router.push(`/?session=${chatId}`);
-    }, [router]);
-
-    const handleRenameSubmit = useCallback(async (name: string) => {
-        if (!project) return;
-        await renameProject(project.id, name);
-        setProject((prev) => (prev ? { ...prev, name } : prev));
-    }, [project, renameProject]);
+    // ── Project actions ───────────────────────────────────────────────────
+    const handleRenameSubmit = useCallback(
+        async (name: string) => {
+            if (!project) return;
+            await renameProject(project.id, name);
+            setProject((prev) => (prev ? { ...prev, name } : prev));
+        },
+        [project, renameProject]
+    );
 
     const handleDeleteProject = useCallback(async () => {
         if (!project) return;
@@ -144,35 +165,108 @@ export default function ProjectPage() {
         router.push('/');
     }, [project, deleteProject, router]);
 
-    const handleDeleteChat = useCallback(async () => {
-        if (!pendingDeleteChatId) return;
-        const id = pendingDeleteChatId;
-        setChats((prev) => prev.filter((c) => c.id !== id));
-        setPendingDeleteChatId(null);
-        const { error } = await supabase.from('chat_sessions').delete().eq('id', id);
+    // ── New-chat flows ────────────────────────────────────────────────────
+    // Bare "New chat" button: hand off to home with project param so the
+    // next session lands in this project. The user types their first
+    // message in the home composer.
+    const handleNewChat = useCallback(() => {
+        if (!projectId) return;
+        router.push(`/?project=${projectId}`);
+    }, [projectId, router]);
+
+    // Empty-state composer: the user types the first message HERE. We
+    // serialize the payload (message + attachments + selected tool) into
+    // sessionStorage and route to /. The home page picks it up, calls
+    // newChat(projectId), and auto-fires sendMessage so the chat starts
+    // streaming immediately.
+    const handleEmptyStateSubmit = useCallback(
+        (message: string, attachments: Attachment[], tool?: string) => {
+            if (!projectId) return;
+            try {
+                sessionStorage.setItem(
+                    PENDING_KEY(projectId),
+                    JSON.stringify({ message, attachments, tool })
+                );
+            } catch (err) {
+                console.error('Failed to stage pending project message:', err);
+            }
+            router.push(`/?project=${projectId}`);
+        },
+        [projectId, router]
+    );
+
+    // ── Chat row mutations (used by ChatListView) ─────────────────────────
+    const handleOpenChat = useCallback(
+        (sessionId: string) => {
+            router.push(`/?session=${sessionId}`);
+        },
+        [router]
+    );
+
+    const handleRenameChat = useCallback(async (sessionId: string, title: string) => {
+        const trimmed = title.trim();
+        if (!trimmed) return;
+        setChats((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, title: trimmed } : s))
+        );
+        const { error } = await (supabase as any)
+            .from('chat_sessions')
+            .update({ title: trimmed })
+            .eq('id', sessionId);
+        if (error) console.error('Rename failed:', error);
+    }, []);
+
+    const handleTogglePinChat = useCallback(async (sessionId: string) => {
+        let nextPinned = false;
+        setChats((prev) =>
+            prev.map((s) => {
+                if (s.id === sessionId) {
+                    nextPinned = !s.isPinned;
+                    return { ...s, isPinned: nextPinned };
+                }
+                return s;
+            })
+        );
+        await (supabase as any)
+            .from('chat_sessions')
+            .update({ is_pinned: nextPinned })
+            .eq('id', sessionId);
+    }, []);
+
+    const handleToggleArchiveChat = useCallback(async (sessionId: string) => {
+        let nextArchived = false;
+        setChats((prev) =>
+            prev.map((s) => {
+                if (s.id === sessionId) {
+                    nextArchived = !s.isArchived;
+                    return { ...s, isArchived: nextArchived };
+                }
+                return s;
+            })
+        );
+        await (supabase as any)
+            .from('chat_sessions')
+            .update({ is_archived: nextArchived })
+            .eq('id', sessionId);
+    }, []);
+
+    const handleRequestDeleteChat = useCallback((sessionId: string, title: string) => {
+        setPendingDeleteChat({ sessionId, title });
+    }, []);
+
+    const handleConfirmDeleteChat = useCallback(async () => {
+        if (!pendingDeleteChat) return;
+        const { sessionId } = pendingDeleteChat;
+        setChats((prev) => prev.filter((c) => c.id !== sessionId));
+        setPendingDeleteChat(null);
+        const { error } = await supabase.from('chat_sessions').delete().eq('id', sessionId);
         if (error) {
             console.error('Failed to delete chat:', error);
             void loadChats();
         }
-    }, [pendingDeleteChatId, loadChats]);
+    }, [pendingDeleteChat, loadChats]);
 
-    const formatRelative = useMemo(() => {
-        const fmt = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
-        return (date: Date) => {
-            const diffMs = date.getTime() - Date.now();
-            const sec = Math.round(diffMs / 1000);
-            const min = Math.round(sec / 60);
-            const hr = Math.round(min / 60);
-            const day = Math.round(hr / 24);
-            if (Math.abs(sec) < 60) return fmt.format(sec, 'second');
-            if (Math.abs(min) < 60) return fmt.format(min, 'minute');
-            if (Math.abs(hr) < 24) return fmt.format(hr, 'hour');
-            if (Math.abs(day) < 30) return fmt.format(day, 'day');
-            return date.toLocaleDateString();
-        };
-    }, []);
-
-    // ── Loading & error states ────────────────────────────────────────────
+    // ── Loading & error states ───────────────────────────────────────────
     if (authLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background">
@@ -187,31 +281,43 @@ export default function ProjectPage() {
             <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background text-center p-6">
                 <Folder className="h-10 w-10 text-foreground-subtle" />
                 <h1 className="text-lg font-semibold text-foreground">Project not found</h1>
-                <p className="text-sm text-foreground-muted">It may have been deleted or you don&apos;t have access to it.</p>
-                <Link href="/" className="mt-2 text-sm text-foreground underline-offset-4 hover:underline">
+                <p className="text-sm text-foreground-muted">
+                    It may have been deleted or you don&apos;t have access to it.
+                </p>
+                <Link
+                    href="/"
+                    className="mt-2 text-sm text-foreground underline-offset-4 hover:underline"
+                >
                     Back to chats
                 </Link>
             </div>
         );
     }
 
+    const isTrulyEmpty = chatsLoaded && chats.length === 0;
+
     return (
         <ChatAccentProvider>
-            {/*
-              Reuse the same Sidebar so navigation feels identical to the
-              home page. Project actions (new/rename/delete) live in the
-              sidebar already; we pass empty session handlers since chat
-              session mutations don't apply on this page.
-            */}
+            {/* Reuse the same Sidebar so navigation feels identical to the home
+                page. Project chats are nested inside a Project entry, so the
+                sidebar's chat list intentionally receives an empty array. */}
             <Sidebar
                 sessions={[]}
                 currentSessionId={null}
                 onNewChat={handleNewChat}
-                onSearch={() => { /* search is wired on home; no-op here */ }}
+                onSearch={() => {
+                    /* search is wired on /chats; no-op here */
+                }}
                 onSelectSession={(id) => router.push(`/?session=${id}`)}
-                onDeleteSession={() => { /* unused on this page */ }}
-                onPinSession={() => { /* unused on this page */ }}
-                onArchiveSession={() => { /* unused on this page */ }}
+                onDeleteSession={() => {
+                    /* unused on this page */
+                }}
+                onPinSession={() => {
+                    /* unused on this page */
+                }}
+                onArchiveSession={() => {
+                    /* unused on this page */
+                }}
                 isMobileOpen={isSidebarOpen}
                 onMobileClose={() => setIsSidebarOpen(false)}
             />
@@ -252,16 +358,26 @@ export default function ProjectPage() {
                                     <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44 bg-popover text-popover-foreground border-border" sideOffset={6}>
+                            <DropdownMenuContent
+                                align="end"
+                                className="w-44 bg-popover text-popover-foreground border-border"
+                                sideOffset={6}
+                            >
                                 <DropdownMenuItem
-                                    onSelect={(e) => { e.preventDefault(); setRenameOpen(true); }}
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        setRenameOpen(true);
+                                    }}
                                     className="cursor-pointer text-[13px]"
                                 >
                                     <Pencil className="mr-2 h-4 w-4" />
                                     Rename project
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                    onSelect={(e) => { e.preventDefault(); setDeleteOpen(true); }}
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        setDeleteOpen(true);
+                                    }}
                                     className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer text-[13px]"
                                 >
                                     <Trash2 className="mr-2 h-4 w-4" />
@@ -274,90 +390,52 @@ export default function ProjectPage() {
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto">
-                    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+                    <div className="max-w-[1100px] mx-auto px-6 md:px-10 lg:px-14 pt-8 md:pt-10 pb-16">
                         {/* Title row */}
-                        <div className="flex items-start gap-3 mb-6">
+                        <div className="flex items-start gap-3 mb-7">
                             <div className="h-10 w-10 rounded-xl bg-surface-2 border border-border flex items-center justify-center shrink-0">
                                 <Folder className="h-5 w-5 text-foreground" />
                             </div>
                             <div className="min-w-0 flex-1">
-                                <h1 className="text-[22px] sm:text-[26px] font-semibold tracking-tight text-foreground text-balance break-words">
+                                <h1 className="text-2xl md:text-[28px] font-semibold tracking-tight text-foreground text-balance break-words">
                                     {project?.name ?? 'Loading…'}
                                 </h1>
-                                <p className="text-[13px] text-foreground-muted mt-1">
-                                    {chats.length === 0
-                                        ? 'No chats yet — start your first conversation.'
-                                        : `${chats.length} ${chats.length === 1 ? 'chat' : 'chats'} in this project`}
+                                <p className="mt-1.5 text-[14px] text-foreground-muted leading-relaxed">
+                                    {!chatsLoaded
+                                        ? 'Loading chats…'
+                                        : chats.length === 0
+                                            ? 'No chats yet — start your first conversation below.'
+                                            : `${chats.length} ${chats.length === 1 ? 'chat' : 'chats'} in this project`}
                                 </p>
                             </div>
-                            <button
-                                type="button"
-                                onClick={handleNewChat}
-                                className="hidden sm:inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
-                            >
-                                <Plus className="h-4 w-4" />
-                                New chat
-                            </button>
                         </div>
 
-                        {/* Mobile new-chat button */}
-                        <button
-                            type="button"
-                            onClick={handleNewChat}
-                            className="sm:hidden w-full inline-flex items-center justify-center gap-2 h-10 px-3 rounded-lg bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors mb-4"
-                        >
-                            <Plus className="h-4 w-4" />
-                            New chat
-                        </button>
-
-                        {/* Chat list */}
+                        {/* Either the empty-state composer OR the full chat list. */}
                         {!chatsLoaded ? (
-                            <div className="flex items-center justify-center py-16">
+                            <div className="flex items-center justify-center py-20">
                                 <Loader2 className="h-5 w-5 animate-spin text-foreground-muted" />
                             </div>
-                        ) : chats.length === 0 ? (
-                            <button
-                                type="button"
-                                onClick={handleNewChat}
-                                className={cn(
-                                    'w-full flex flex-col items-center justify-center gap-2 py-12 rounded-xl',
-                                    'border border-dashed border-border text-foreground-muted hover:text-foreground hover:bg-surface-2',
-                                    'transition-colors'
-                                )}
-                            >
-                                <MessageSquare className="h-6 w-6" />
-                                <span className="text-sm font-medium">Start your first chat in this project</span>
-                                <span className="text-[12px] text-foreground-subtle">Click anywhere to begin</span>
-                            </button>
+                        ) : isTrulyEmpty ? (
+                            <EmptyComposer
+                                onSubmit={handleEmptyStateSubmit}
+                                projectName={project?.name ?? 'this project'}
+                            />
                         ) : (
-                            <ul className="space-y-1">
-                                {chats.map((chat) => (
-                                    <li
-                                        key={chat.id}
-                                        className="group flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-2 transition-colors cursor-pointer"
-                                        onClick={() => handleSelectChat(chat.id)}
-                                    >
-                                        <MessageSquare className="h-4 w-4 shrink-0 text-foreground-subtle" />
-                                        <span className="flex-1 min-w-0 truncate text-[14px] text-foreground">
-                                            {chat.title}
-                                        </span>
-                                        <span className="text-[11px] text-foreground-subtle shrink-0 hidden sm:inline">
-                                            {formatRelative(chat.updatedAt)}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setPendingDeleteChatId(chat.id);
-                                            }}
-                                            aria-label="Delete chat"
-                                            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-foreground-subtle hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all"
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
-                                    </li>
-                                ))}
-                            </ul>
+                            <ChatListView
+                                sessions={chats}
+                                loading={false}
+                                user={user}
+                                onOpen={handleOpenChat}
+                                onNewChat={handleNewChat}
+                                onRename={handleRenameChat}
+                                onTogglePin={handleTogglePinChat}
+                                onToggleArchive={handleToggleArchiveChat}
+                                onDelete={handleRequestDeleteChat}
+                                showProjectColumn={false}
+                                searchPlaceholder="Search chats in this project…"
+                                emptyTitle="No chats match your filters"
+                                emptySubtitle="Try clearing your search or switching filters."
+                            />
                         )}
                     </div>
                 </div>
@@ -389,14 +467,57 @@ export default function ProjectPage() {
 
             {/* Delete chat confirmation */}
             <ConfirmModal
-                open={pendingDeleteChatId !== null}
-                onClose={() => setPendingDeleteChatId(null)}
-                onConfirm={handleDeleteChat}
+                open={pendingDeleteChat !== null}
+                onClose={() => setPendingDeleteChat(null)}
+                onConfirm={handleConfirmDeleteChat}
                 title="Delete chat?"
-                description="This chat and all its messages will be permanently deleted. This action cannot be undone."
+                description={
+                    pendingDeleteChat
+                        ? `"${pendingDeleteChat.title}" and all of its messages will be permanently deleted. This action cannot be undone.`
+                        : ''
+                }
                 confirmLabel="Delete"
                 confirmVariant="danger"
             />
         </ChatAccentProvider>
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Empty-state composer — the project has zero chats. The user types here and
+// the message is handed off to the home page to actually start the session.
+// ────────────────────────────────────────────────────────────────────────────
+
+function EmptyComposer({
+    onSubmit,
+    projectName,
+}: {
+    onSubmit: (message: string, attachments: Attachment[], tool?: string) => void;
+    projectName: string;
+}) {
+    return (
+        <div className="flex flex-col items-center text-center pt-4 pb-2">
+            <div className="h-12 w-12 rounded-2xl bg-surface-2 border border-border flex items-center justify-center mb-4">
+                <Folder className="h-6 w-6 text-foreground" />
+            </div>
+            <h2 className="text-[18px] md:text-[20px] font-semibold text-foreground text-balance">
+                Start your first chat in {projectName}
+            </h2>
+            <p className="mt-1.5 text-[13px] text-foreground-muted max-w-md leading-relaxed">
+                Type a message below to begin. New chats you create here will live inside
+                this project.
+            </p>
+
+            <div className="w-full max-w-3xl mt-6 -mx-4 sm:mx-0">
+                {/* ChatInput owns the textarea, attachments, tools, and submit
+                    button. We override its outer padding via wrapping context
+                    (it uses px-4 internally) so it sits flush in the page. */}
+                <ChatInput onSend={onSubmit} />
+            </div>
+
+            <p className="mt-3 text-[11px] text-foreground-subtle">
+                Press <kbd className="font-mono bg-surface-2 border border-border rounded px-1 py-0.5">Enter</kbd> to send.
+            </p>
+        </div>
     );
 }

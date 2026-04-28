@@ -15,3 +15,9 @@ export { DragDropOverlay } from './DragDropOverlay';
 export { MessageAttachments } from './MessageAttachments';
 export { ProjectsSection } from './ProjectsSection';
 export { ProjectModal } from './ProjectModal';
+export { ChatListView } from './ChatListView';
+export type {
+    ChatListFilterId,
+    ChatListSortId,
+    ChatListViewProps,
+} from './ChatListView';
