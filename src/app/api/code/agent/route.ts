@@ -4,7 +4,18 @@ import { streamNvidiaCompletion, parseSSEStream } from '@/lib/nvidia-nim';
 import { Database } from '@/types/database';
 import { buildBuilderSystemPrompt } from '@/lib/code-agent/system-prompt';
 import { BuilderTagStreamParser } from '@/lib/code-agent/parser';
-import type { BuilderFiles, BuilderStreamEvent } from '@/types/code';
+import {
+    applyFileAction,
+    insertBuilderMessage,
+    loadWorkspaceForUser,
+} from '@/lib/code-agent/db';
+import type {
+    BuilderFileAction,
+    BuilderStep,
+    BuilderStreamEvent,
+} from '@/types/code';
+
+export const runtime = 'nodejs';
 
 type AdminSettingsRow = Database['public']['Tables']['admin_settings']['Row'];
 
@@ -13,17 +24,19 @@ const QUOTA_WINDOW_MS = 5 * 60 * 60 * 1000;
 const RPM_LIMIT = 20;
 const NVIDIA_TIMEOUT_MS = 45_000; // generous — agent turns produce more tokens
 const MAX_INPUT_CHARS = 40_000;
+const MAX_HISTORY_TURNS = 12;
+const MAX_HISTORY_CHARS_PER_TURN = 4_000;
 
 interface AgentRequestBody {
-    /** Stable id for this builder workspace (used for logging only). */
-    sessionId: string;
-    /** The user's new message for this turn. */
-    message: string;
-    /** Prior conversation, role-tagged, oldest first. Excludes the new message. */
-    history: Array<{ role: 'user' | 'assistant'; content: string }>;
-    /** Current state of the virtual file system. */
-    files: BuilderFiles;
-    /** Optional model id; resolved against the `models` table. */
+    /** Workspace this turn belongs to. Server is the source of truth. */
+    workspaceId: string;
+    /**
+     * Optional new user message. If omitted, the agent runs against whatever
+     * is currently in the DB (used to auto-resume after a workspace was
+     * created with an initial message).
+     */
+    message?: string;
+    /** Optional model id (resolves against the `models` table; 'auto' picks one). */
     model?: string;
 }
 
@@ -33,6 +46,10 @@ function estimateTokens(text: string): number {
 
 function encodeEvent(ev: BuilderStreamEvent): Uint8Array {
     return new TextEncoder().encode(JSON.stringify(ev) + '\n');
+}
+
+function genStepId(): string {
+    return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -53,37 +70,38 @@ export async function POST(request: NextRequest) {
         }
 
         const body = (await request.json()) as Partial<AgentRequestBody>;
-        const message = (body.message ?? '').toString();
-        const history = Array.isArray(body.history) ? body.history : [];
-        const files: BuilderFiles =
-            body.files && typeof body.files === 'object' ? body.files : {};
+        const workspaceId = (body.workspaceId ?? '').toString();
+        const newMessage = (body.message ?? '').toString();
         const requestedModel = body.model || 'auto';
 
-        if (!message.trim()) {
-            return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+        if (!workspaceId) {
+            return NextResponse.json({ error: 'workspaceId is required' }, { status: 400 });
         }
-        if (message.length > MAX_INPUT_CHARS) {
+        if (newMessage.length > MAX_INPUT_CHARS) {
             return NextResponse.json(
-                { error: `Message exceeds the maximum allowed length of ${MAX_INPUT_CHARS.toLocaleString()} characters.` },
+                {
+                    error: `Message exceeds the maximum allowed length of ${MAX_INPUT_CHARS.toLocaleString()} characters.`,
+                },
                 { status: 400 },
             );
         }
 
         const supabase = await createClient();
-        const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
-        const windowStart = new Date(Date.now() - QUOTA_WINDOW_MS).toISOString();
-
-        // ── Resolve auth + admin settings + model in parallel ────────────────
-        const [authRes, settingsRes, modelsRes] = await Promise.all([
-            supabase.auth.getUser(),
-            supabase.from('admin_settings').select('*').single(),
-            supabase.from('models').select('*'),
-        ]);
-
-        const user = authRes.data.user;
+        const {
+            data: { user },
+        } = await supabase.auth.getUser();
         if (!user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
+
+        // ── Admin settings + models in parallel ──────────────────────────────
+        const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
+        const windowStart = new Date(Date.now() - QUOTA_WINDOW_MS).toISOString();
+
+        const [settingsRes, modelsRes] = await Promise.all([
+            supabase.from('admin_settings').select('*').single(),
+            supabase.from('models').select('*'),
+        ]);
 
         const adminSettings = settingsRes.data as AdminSettingsRow | null;
         if (adminSettings?.edit_mode) {
@@ -115,7 +133,7 @@ export async function POST(request: NextRequest) {
         const modelId: string = dbModel.id;
         const quotaLimit: number = dbModel.quota_limit ?? 500_000;
 
-        // ── Per-user rate / quota checks (parallel) ──────────────────────────
+        // ── Per-user rate / quota ────────────────────────────────────────────
         const [recentRequestsRes, usageRowsRes] = await Promise.all([
             supabase
                 .from('requests_log')
@@ -160,6 +178,43 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // ── Persist the new user message (if provided) ───────────────────────
+        if (newMessage.trim()) {
+            try {
+                await insertBuilderMessage(supabase, {
+                    workspaceId,
+                    userId: user.id,
+                    role: 'user',
+                    content: newMessage.trim(),
+                });
+            } catch (err) {
+                console.error('[Builder] Failed to insert user message:', err);
+                return NextResponse.json(
+                    { error: 'Failed to save your message. Please try again.' },
+                    { status: 500 },
+                );
+            }
+        }
+
+        // ── Load workspace state from the DB (source of truth) ───────────────
+        const workspace = await loadWorkspaceForUser(supabase, workspaceId, user.id);
+        if (!workspace) {
+            return NextResponse.json(
+                { error: 'Workspace not found' },
+                { status: 404 },
+            );
+        }
+
+        // The most recent user message must be unanswered (no following
+        // assistant message). Otherwise this is a duplicate / stale call.
+        const lastMsg = workspace.messages[workspace.messages.length - 1];
+        if (!lastMsg || lastMsg.role !== 'user') {
+            return NextResponse.json(
+                { error: 'No pending user message to respond to.' },
+                { status: 400 },
+            );
+        }
+
         // Fire-and-forget request log.
         supabase
             .from('requests_log')
@@ -171,36 +226,31 @@ export async function POST(request: NextRequest) {
             });
 
         // ── Build prompt ─────────────────────────────────────────────────────
-        const systemPrompt = buildBuilderSystemPrompt(files);
+        const systemPrompt = buildBuilderSystemPrompt(workspace.files);
 
-        // History is intentionally trimmed: only the last 12 turns to keep the
-        // context lean — the file listing carries the heavy state.
-        const trimmedHistory = history.slice(-12).map((m) => ({
+        // History excludes the just-inserted user message; we send that
+        // separately as the final user turn so the model has it as the
+        // current request.
+        const priorMessages = workspace.messages.slice(0, -1);
+        const trimmed = priorMessages.slice(-MAX_HISTORY_TURNS).map((m) => ({
             role: m.role,
-            content:
-                typeof m.content === 'string' && m.content.length > 4_000
-                    ? m.content.slice(0, 4_000) + ' [truncated]'
-                    : m.content,
+            content: renderHistoryContent(m.role, m.content, m.steps ?? []),
         }));
 
         const apiMessages = [
             { role: 'system' as const, content: systemPrompt },
-            ...trimmedHistory,
-            { role: 'user' as const, content: message },
+            ...trimmed,
+            { role: 'user' as const, content: lastMsg.content },
         ];
 
         const temperature = adminSettings?.temperature ?? 0.6;
-        // Code generation eats tokens — cap higher than chat default.
         const maxTokens = Math.max(adminSettings?.max_tokens ?? 0, 4096);
         const modelName: string =
             dbModel.name || adminSettings?.model_name || 'meta/llama-3.1-8b-instruct';
 
         // ── Stream from NVIDIA, parse tags into NDJSON events ────────────────
         const timeoutController = new AbortController();
-        const timeoutId = setTimeout(
-            () => timeoutController.abort(),
-            NVIDIA_TIMEOUT_MS,
-        );
+        const timeoutId = setTimeout(() => timeoutController.abort(), NVIDIA_TIMEOUT_MS);
 
         let upstream: ReadableStream<Uint8Array>;
         try {
@@ -229,31 +279,56 @@ export async function POST(request: NextRequest) {
         const parser = new BuilderTagStreamParser();
         const stripThink = createThinkStripper();
 
-        const inputTokens = estimateTokens(apiMessages.map((m) => m.content).join(' '));
+        // Server-side mirror of the conversation that gets persisted at end.
+        const stepsAcc: BuilderStep[] = [];
+        let textAcc = '';
         let outputChars = 0;
+        const inputTokens = estimateTokens(apiMessages.map((m) => m.content).join(' '));
+
+        // Serialize DB writes for file actions so create→edit→delete on the
+        // same path always lands in the right order.
+        let writeChain: Promise<void> = Promise.resolve();
+        const queueWrite = (op: () => Promise<void>) => {
+            writeChain = writeChain.then(op).catch((err) => {
+                console.error('[Builder Agent] file write failed:', err);
+            });
+        };
+
+        const closeOpenMilestone = () => {
+            for (let i = stepsAcc.length - 1; i >= 0; i--) {
+                const s = stepsAcc[i];
+                if (s.kind === 'milestone' && s.status === 'doing') {
+                    stepsAcc[i] = { ...s, status: 'done' };
+                    return;
+                }
+            }
+        };
 
         const out = new ReadableStream<Uint8Array>({
             async start(controller) {
+                let errored = false;
                 try {
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done) break;
 
-                        // Strip <think>...</think> reasoning blocks from the
-                        // visible stream — Builder doesn't surface those.
                         outputChars += value.length;
                         const cleaned = stripThink(value);
 
                         for (const ev of parser.feed(cleaned)) {
+                            handleServerEvent(ev);
                             controller.enqueue(encodeEvent(ev));
                         }
                     }
 
                     for (const ev of parser.flush()) {
+                        handleServerEvent(ev);
                         controller.enqueue(encodeEvent(ev));
                     }
+                    closeOpenMilestone();
                     controller.enqueue(encodeEvent({ type: 'done' }));
                 } catch (err) {
+                    errored = true;
                     console.error('[Builder Agent] stream error:', err);
                     controller.enqueue(
                         encodeEvent({
@@ -264,8 +339,30 @@ export async function POST(request: NextRequest) {
                 } finally {
                     clearTimeout(timeoutId);
 
-                    // Record token usage (fire-and-forget).
-                    const totalTokens = inputTokens + estimateTokens('x'.repeat(outputChars));
+                    // Wait for any in-flight file writes to settle, then
+                    // persist the final assistant message + record token usage.
+                    queueWrite(async () => {
+                        try {
+                            await insertBuilderMessage(supabase, {
+                                workspaceId,
+                                userId: user.id,
+                                role: 'assistant',
+                                content: textAcc.trim(),
+                                steps: stepsAcc,
+                                errored,
+                            });
+                        } catch (err) {
+                            console.error('[Builder Agent] persist final message failed:', err);
+                        }
+                    });
+                    try {
+                        await writeChain;
+                    } catch {
+                        /* logged inside queueWrite */
+                    }
+
+                    const totalTokens =
+                        inputTokens + estimateTokens('x'.repeat(outputChars));
                     supabase
                         .from('token_usage')
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -302,6 +399,35 @@ export async function POST(request: NextRequest) {
                 'X-Quota-Limit': String(quotaLimit),
             },
         });
+
+        // ── Helpers closing over the outer state ─────────────────────────────
+
+        function handleServerEvent(ev: BuilderStreamEvent) {
+            if (ev.type === 'text') {
+                textAcc += ev.delta;
+                return;
+            }
+            if (ev.type === 'milestone') {
+                closeOpenMilestone();
+                stepsAcc.push({
+                    id: genStepId(),
+                    kind: 'milestone',
+                    text: ev.text,
+                    status: 'doing',
+                });
+                return;
+            }
+            if (ev.type === 'action') {
+                stepsAcc.push({
+                    id: genStepId(),
+                    kind: 'action',
+                    action: ev.action,
+                    status: 'done',
+                });
+                queueWrite(() => persistAction(supabase, workspaceId, ev.action));
+                return;
+            }
+        }
     } catch (error) {
         console.error('[Builder Agent] route error:', error);
         return NextResponse.json(
@@ -312,13 +438,53 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * NVIDIA NIM emits its reasoning between `<think>...</think>` blocks. We hide
- * those from the Builder UI — only the final-answer text and tags should reach
- * the parser.
- *
- * `<think>` may open in one chunk and close in another, so the stripper keeps
- * a flag across calls. We instantiate one per request to avoid leaking state
- * between concurrent invocations on the same serverless instance.
+ * Persist a single agent file action, swallowing per-action errors so one
+ * failure doesn't tear down the whole stream.
+ */
+async function persistAction(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    supabase: any,
+    workspaceId: string,
+    action: BuilderFileAction,
+): Promise<void> {
+    try {
+        await applyFileAction(supabase, workspaceId, action);
+    } catch (err) {
+        console.error('[Builder Agent] persist action failed:', action.kind, action.path, err);
+    }
+}
+
+/**
+ * Compress an old turn into a single string the model can use as history.
+ * For assistant turns we summarise the timeline (milestones + applied
+ * actions) instead of replaying every token — keeps context small.
+ */
+function renderHistoryContent(
+    role: 'user' | 'assistant',
+    content: string,
+    steps: BuilderStep[],
+): string {
+    if (role === 'user') {
+        return content.length > MAX_HISTORY_CHARS_PER_TURN
+            ? content.slice(0, MAX_HISTORY_CHARS_PER_TURN) + ' [truncated]'
+            : content;
+    }
+    const parts: string[] = [];
+    for (const s of steps) {
+        if (s.kind === 'milestone') parts.push(`• ${s.text}`);
+        else parts.push(`[${s.action.kind}] ${s.action.path}`);
+    }
+    if (content.trim()) parts.push(content.trim());
+    const joined = parts.join('\n');
+    return joined.length > MAX_HISTORY_CHARS_PER_TURN
+        ? joined.slice(0, MAX_HISTORY_CHARS_PER_TURN) + ' [truncated]'
+        : joined;
+}
+
+/**
+ * NVIDIA NIM emits its reasoning between `<think>...</think>` blocks. Hide
+ * those from the Builder UI — only the final-answer text and tags reach the
+ * tag parser. State is per-request to avoid cross-invocation leaks.
  */
 function createThinkStripper(): (chunk: string) => string {
     let inside = false;
@@ -337,10 +503,7 @@ function createThinkStripper(): (chunk: string) => string {
                 i = open + '<think>'.length;
             } else {
                 const close = chunk.indexOf('</think>', i);
-                if (close === -1) {
-                    // Drop the rest of the chunk; we're still inside <think>.
-                    break;
-                }
+                if (close === -1) break; // drop rest of chunk; still inside
                 inside = false;
                 i = close + '</think>'.length;
             }

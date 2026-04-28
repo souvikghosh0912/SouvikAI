@@ -45,7 +45,7 @@ export function BuilderChatPanel({
                     <div className="h-6 w-6 rounded-md bg-foreground text-background flex items-center justify-center">
                         <Sparkles className="h-3.5 w-3.5" />
                     </div>
-                    <span className="text-[13px] font-semibold">Builder</span>
+                    <span className="text-[13px] font-semibold">Forge</span>
                 </div>
             </header>
 
@@ -73,7 +73,7 @@ export function BuilderChatPanel({
             <div className="shrink-0 px-4 pb-4 pt-2 border-t border-border-subtle bg-background">
                 <BuilderChatInput
                     variant="compact"
-                    placeholder="Tell Builder what to change…"
+                    placeholder="Tell Forge what to change…"
                     isStreaming={isStreaming}
                     onSend={onSend}
                     onStop={onStop}

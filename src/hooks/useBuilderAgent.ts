@@ -5,56 +5,54 @@ import type {
     BuilderFiles,
     BuilderFileAction,
     BuilderMessage,
-    BuilderSession,
     BuilderStep,
     BuilderStreamEvent,
+    BuilderWorkspace,
 } from '@/types/code';
-import { cloneBaseTemplate, DEFAULT_ACTIVE_FILE } from '@/lib/code-agent/template';
 
-const SESSION_KEY = (id: string) => `souvik:builder-session:${id}`;
-const SCHEMA_VERSION = 1;
-
-interface PersistedSession {
-    v: number;
-    session: BuilderSession;
+interface HookState {
+    workspace: BuilderWorkspace | null;
+    isLoading: boolean;
+    loadError: string | null;
+    isStreaming: boolean;
+    streamError: string | null;
+    selectedModelId: string;
 }
 
-function loadSession(id: string): BuilderSession | null {
-    if (typeof window === 'undefined') return null;
-    try {
-        const raw = sessionStorage.getItem(SESSION_KEY(id));
-        if (!raw) return null;
-        const parsed = JSON.parse(raw) as PersistedSession;
-        if (parsed.v !== SCHEMA_VERSION) return null;
-        return parsed.session;
-    } catch {
-        return null;
-    }
+export interface UseBuilderAgentResult {
+    workspace: BuilderWorkspace | null;
+    isLoading: boolean;
+    loadError: string | null;
+    isStreaming: boolean;
+    error: string | null;
+    selectedModelId: string;
+    setSelectedModelId: (next: string) => void;
+    setActiveFile: (path: string | null) => void;
+    updateFile: (path: string, content: string) => void;
+    deleteFile: (path: string) => Promise<void>;
+    /** Send a brand-new user message and stream the agent reply. */
+    sendMessage: (text: string) => Promise<void>;
+    /**
+     * Resume the agent against the most recently persisted user message
+     * (used right after workspace creation when the first user message was
+     * inserted by the create endpoint).
+     */
+    resumePending: () => Promise<void>;
+    abort: () => void;
 }
 
-function saveSession(session: BuilderSession) {
-    if (typeof window === 'undefined') return;
-    try {
-        const payload: PersistedSession = { v: SCHEMA_VERSION, session };
-        sessionStorage.setItem(SESSION_KEY(session.id), JSON.stringify(payload));
-    } catch (err) {
-        // Quota exceeded or storage disabled — log and move on. The user can
-        // keep working in-memory; persistence is best-effort.
-        console.warn('[Builder] Failed to persist session:', err);
-    }
-}
+const PLACEHOLDER_WORKSPACE = (id: string): BuilderWorkspace => ({
+    id,
+    title: 'Loading…',
+    files: {},
+    activeFile: null,
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+});
 
-function newSession(id: string): BuilderSession {
-    const now = Date.now();
-    return {
-        id,
-        title: 'New project',
-        files: cloneBaseTemplate(),
-        messages: [],
-        activeFile: DEFAULT_ACTIVE_FILE,
-        createdAt: now,
-        updatedAt: now,
-    };
+function genId(prefix = 'm'): string {
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function applyAction(files: BuilderFiles, action: BuilderFileAction): BuilderFiles {
@@ -67,94 +65,247 @@ function applyAction(files: BuilderFiles, action: BuilderFileAction): BuilderFil
     return { ...files, [action.path]: action.content };
 }
 
-function genId(prefix = 'm'): string {
-    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export interface UseBuilderAgentResult {
-    session: BuilderSession;
-    isStreaming: boolean;
-    error: string | null;
-    selectedModelId: string;
-    setSelectedModelId: (next: string) => void;
-    setActiveFile: (path: string | null) => void;
-    updateFile: (path: string, content: string) => void;
-    sendMessage: (text: string) => Promise<void>;
-    abort: () => void;
-}
-
 /**
- * Owns one Builder workspace session: the file system, message history, and
- * the streaming agent connection.
+ * Owns one Builder workspace session backed by Supabase.
  *
- * Persistence is per-tab (sessionStorage) keyed by the session id passed in
- * the URL. Reload-safe within the same tab; closing the tab clears it.
+ *  • Hydrates the workspace from the server on mount.
+ *  • Streams agent turns through `/api/code/agent`, applying NDJSON events
+ *    optimistically while the server persists the canonical state.
+ *  • In-editor edits are pushed to the server with debounced PUTs so the
+ *    workspace survives reload regardless of which side made the change.
  */
-export function useBuilderAgent(sessionId: string): UseBuilderAgentResult {
-    const [session, setSession] = useState<BuilderSession>(() => {
-        return loadSession(sessionId) ?? newSession(sessionId);
-    });
-    const [isStreaming, setIsStreaming] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [selectedModelId, setSelectedModelId] = useState<string>('auto');
+export function useBuilderAgent(workspaceId: string): UseBuilderAgentResult {
+    const [state, setState] = useState<HookState>(() => ({
+        workspace: workspaceId ? PLACEHOLDER_WORKSPACE(workspaceId) : null,
+        isLoading: !!workspaceId,
+        loadError: null,
+        isStreaming: false,
+        streamError: null,
+        selectedModelId: 'auto',
+    }));
+
     const abortRef = useRef<AbortController | null>(null);
+    const workspaceRef = useRef<BuilderWorkspace | null>(state.workspace);
+    workspaceRef.current = state.workspace;
 
-    // Keep the ref version of session in sync so the streaming callback always
-    // sees the latest message map without needing to be re-created.
-    const sessionRef = useRef(session);
-    sessionRef.current = session;
+    // Debounced file save timers per path.
+    const saveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+    // Debounced active-file save timer.
+    const activeFileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Persist after every change.
+    // ── Hydration ────────────────────────────────────────────────────────────
+
     useEffect(() => {
-        saveSession(session);
-    }, [session]);
+        if (!workspaceId) return;
+        let cancelled = false;
+        setState((s) => ({
+            ...s,
+            workspace: PLACEHOLDER_WORKSPACE(workspaceId),
+            isLoading: true,
+            loadError: null,
+        }));
+
+        (async () => {
+            try {
+                const res = await fetch(`/api/code/workspaces/${workspaceId}`, {
+                    cache: 'no-store',
+                });
+                if (cancelled) return;
+                if (!res.ok) {
+                    let msg = `Failed to load workspace (${res.status})`;
+                    try {
+                        const data = await res.json();
+                        if (data?.error) msg = data.error;
+                    } catch {
+                        /* ignore */
+                    }
+                    setState((s) => ({
+                        ...s,
+                        isLoading: false,
+                        loadError: msg,
+                    }));
+                    return;
+                }
+                const data = (await res.json()) as { workspace: BuilderWorkspace };
+                if (cancelled) return;
+                setState((s) => ({
+                    ...s,
+                    workspace: data.workspace,
+                    isLoading: false,
+                    loadError: null,
+                }));
+            } catch (err) {
+                if (cancelled) return;
+                setState((s) => ({
+                    ...s,
+                    isLoading: false,
+                    loadError: (err as Error)?.message ?? 'Failed to load workspace',
+                }));
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [workspaceId]);
+
+    // Cleanup pending timers on unmount.
+    useEffect(() => {
+        return () => {
+            for (const t of saveTimersRef.current.values()) clearTimeout(t);
+            saveTimersRef.current.clear();
+            if (activeFileTimerRef.current) clearTimeout(activeFileTimerRef.current);
+        };
+    }, []);
 
     // ── State helpers ────────────────────────────────────────────────────────
 
     const updateAssistantMessage = useCallback(
         (id: string, mutate: (msg: BuilderMessage) => BuilderMessage) => {
-            setSession((prev) => ({
-                ...prev,
-                updatedAt: Date.now(),
-                messages: prev.messages.map((m) => (m.id === id ? mutate(m) : m)),
-            }));
+            setState((s) => {
+                if (!s.workspace) return s;
+                return {
+                    ...s,
+                    workspace: {
+                        ...s.workspace,
+                        updatedAt: Date.now(),
+                        messages: s.workspace.messages.map((m) => (m.id === id ? mutate(m) : m)),
+                    },
+                };
+            });
         },
         [],
     );
 
-    const setActiveFile = useCallback((path: string | null) => {
-        setSession((prev) => ({ ...prev, activeFile: path, updatedAt: Date.now() }));
+    const setSelectedModelId = useCallback((next: string) => {
+        setState((s) => ({ ...s, selectedModelId: next }));
     }, []);
 
-    const updateFile = useCallback((path: string, content: string) => {
-        setSession((prev) => ({
-            ...prev,
-            files: { ...prev.files, [path]: content },
-            updatedAt: Date.now(),
-        }));
-    }, []);
+    const setActiveFile = useCallback(
+        (path: string | null) => {
+            setState((s) => {
+                if (!s.workspace) return s;
+                return {
+                    ...s,
+                    workspace: { ...s.workspace, activeFile: path, updatedAt: Date.now() },
+                };
+            });
+
+            // Persist with a small debounce so rapid clicks don't hammer
+            // the server.
+            if (activeFileTimerRef.current) clearTimeout(activeFileTimerRef.current);
+            activeFileTimerRef.current = setTimeout(() => {
+                fetch(`/api/code/workspaces/${workspaceId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ activeFile: path }),
+                }).catch((err) => console.warn('[Builder] save activeFile failed:', err));
+            }, 300);
+        },
+        [workspaceId],
+    );
+
+    const updateFile = useCallback(
+        (path: string, content: string) => {
+            setState((s) => {
+                if (!s.workspace) return s;
+                return {
+                    ...s,
+                    workspace: {
+                        ...s.workspace,
+                        files: { ...s.workspace.files, [path]: content },
+                        updatedAt: Date.now(),
+                    },
+                };
+            });
+
+            // Debounced PUT — coalesce rapid keystrokes into one write per
+            // 600ms-quiet-period per path.
+            const timers = saveTimersRef.current;
+            const existing = timers.get(path);
+            if (existing) clearTimeout(existing);
+            const handle = setTimeout(() => {
+                timers.delete(path);
+                fetch(`/api/code/workspaces/${workspaceId}/files`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path, content }),
+                }).catch((err) => console.warn('[Builder] save file failed:', err));
+            }, 600);
+            timers.set(path, handle);
+        },
+        [workspaceId],
+    );
+
+    const deleteFile = useCallback(
+        async (path: string) => {
+            // Cancel any pending save for this path so we don't race the delete.
+            const pending = saveTimersRef.current.get(path);
+            if (pending) {
+                clearTimeout(pending);
+                saveTimersRef.current.delete(path);
+            }
+
+            setState((s) => {
+                if (!s.workspace) return s;
+                if (!(path in s.workspace.files)) return s;
+                const nextFiles = { ...s.workspace.files };
+                delete nextFiles[path];
+                let activeFile = s.workspace.activeFile;
+                if (activeFile === path) {
+                    const keys = Object.keys(nextFiles);
+                    activeFile = keys[0] ?? null;
+                }
+                return {
+                    ...s,
+                    workspace: {
+                        ...s.workspace,
+                        files: nextFiles,
+                        activeFile,
+                        updatedAt: Date.now(),
+                    },
+                };
+            });
+
+            try {
+                await fetch(`/api/code/workspaces/${workspaceId}/files`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path }),
+                });
+            } catch (err) {
+                console.warn('[Builder] delete file failed:', err);
+            }
+        },
+        [workspaceId],
+    );
 
     const abort = useCallback(() => {
         abortRef.current?.abort();
         abortRef.current = null;
-        setIsStreaming(false);
+        setState((s) => ({ ...s, isStreaming: false }));
     }, []);
 
     // ── Streaming send ───────────────────────────────────────────────────────
 
-    const sendMessage = useCallback(
-        async (text: string) => {
-            const trimmed = text.trim();
-            if (!trimmed || isStreaming) return;
+    const runAgent = useCallback(
+        async (opts: { newMessageText?: string }): Promise<void> => {
+            const ws = workspaceRef.current;
+            if (!ws) return;
+            if (state.isStreaming) return;
 
-            setError(null);
+            setState((s) => ({ ...s, streamError: null }));
 
-            const userMsg: BuilderMessage = {
-                id: genId('u'),
-                role: 'user',
-                content: trimmed,
-                createdAt: Date.now(),
-            };
+            // Optimistic message updates: append the user message (if any) and
+            // an empty assistant placeholder.
+            const userMsg: BuilderMessage | null = opts.newMessageText
+                ? {
+                      id: genId('u'),
+                      role: 'user',
+                      content: opts.newMessageText.trim(),
+                      createdAt: Date.now(),
+                  }
+                : null;
             const assistantMsg: BuilderMessage = {
                 id: genId('a'),
                 role: 'assistant',
@@ -164,25 +315,26 @@ export function useBuilderAgent(sessionId: string): UseBuilderAgentResult {
                 createdAt: Date.now() + 1,
             };
 
-            // Snapshot history (excluding the new user message) for the API
-            // call. We send pure role/content pairs — the file map is sent
-            // separately so the system prompt can render it.
-            const history = sessionRef.current.messages.map((m) => ({
-                role: m.role,
-                content:
-                    m.role === 'assistant' && m.steps && m.steps.length > 0
-                        ? renderAssistantTranscript(m)
-                        : m.content,
-            }));
-            const filesSnapshot = sessionRef.current.files;
-
-            setSession((prev) => ({
-                ...prev,
-                messages: [...prev.messages, userMsg, assistantMsg],
-                title: prev.messages.length === 0 ? deriveTitle(trimmed) : prev.title,
-                updatedAt: Date.now(),
-            }));
-            setIsStreaming(true);
+            setState((s) => {
+                if (!s.workspace) return s;
+                const nextMessages = [...s.workspace.messages];
+                if (userMsg) nextMessages.push(userMsg);
+                nextMessages.push(assistantMsg);
+                return {
+                    ...s,
+                    isStreaming: true,
+                    streamError: null,
+                    workspace: {
+                        ...s.workspace,
+                        messages: nextMessages,
+                        title:
+                            s.workspace.messages.length === 0 && userMsg
+                                ? deriveTitle(userMsg.content)
+                                : s.workspace.title,
+                        updatedAt: Date.now(),
+                    },
+                };
+            });
 
             const controller = new AbortController();
             abortRef.current = controller;
@@ -192,11 +344,9 @@ export function useBuilderAgent(sessionId: string): UseBuilderAgentResult {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        sessionId,
-                        message: trimmed,
-                        history,
-                        files: filesSnapshot,
-                        model: selectedModelId,
+                        workspaceId,
+                        message: opts.newMessageText ?? undefined,
+                        model: state.selectedModelId,
                     }),
                     signal: controller.signal,
                 });
@@ -221,7 +371,9 @@ export function useBuilderAgent(sessionId: string): UseBuilderAgentResult {
                     ...m,
                     isStreaming: false,
                     steps: (m.steps ?? []).map((s) =>
-                        s.kind === 'milestone' && s.status === 'doing' ? { ...s, status: 'done' } : s,
+                        s.kind === 'milestone' && s.status === 'doing'
+                            ? { ...s, status: 'done' }
+                            : s,
                     ),
                 }));
             } catch (err) {
@@ -233,7 +385,7 @@ export function useBuilderAgent(sessionId: string): UseBuilderAgentResult {
                     }));
                 } else {
                     const message = (err as Error)?.message || 'Something went wrong.';
-                    setError(message);
+                    setState((s) => ({ ...s, streamError: message }));
                     updateAssistantMessage(assistantMsg.id, (m) => ({
                         ...m,
                         isStreaming: false,
@@ -243,7 +395,7 @@ export function useBuilderAgent(sessionId: string): UseBuilderAgentResult {
                 }
             } finally {
                 abortRef.current = null;
-                setIsStreaming(false);
+                setState((s) => ({ ...s, isStreaming: false }));
             }
 
             function handleStreamEvent(ev: BuilderStreamEvent, msgId: string) {
@@ -257,66 +409,72 @@ export function useBuilderAgent(sessionId: string): UseBuilderAgentResult {
                 }
 
                 if (ev.type === 'milestone') {
-                    setSession((prev) => ({
-                        ...prev,
-                        updatedAt: Date.now(),
-                        messages: prev.messages.map((m) => {
-                            if (m.id !== msgId) return m;
-                            const prevSteps = m.steps ?? [];
-                            // Mark previous active milestone as done.
-                            const closed = prevSteps.map<BuilderStep>((s) =>
-                                s.kind === 'milestone' && s.status === 'doing'
-                                    ? { ...s, status: 'done' }
-                                    : s,
-                            );
-                            const next: BuilderStep = {
-                                id: genId('s'),
-                                kind: 'milestone',
-                                text: ev.text,
-                                status: 'doing',
-                            };
-                            return { ...m, steps: [...closed, next] };
-                        }),
-                    }));
+                    setState((s) => {
+                        if (!s.workspace) return s;
+                        return {
+                            ...s,
+                            workspace: {
+                                ...s.workspace,
+                                updatedAt: Date.now(),
+                                messages: s.workspace.messages.map((m) => {
+                                    if (m.id !== msgId) return m;
+                                    const prevSteps = m.steps ?? [];
+                                    const closed = prevSteps.map<BuilderStep>((step) =>
+                                        step.kind === 'milestone' && step.status === 'doing'
+                                            ? { ...step, status: 'done' }
+                                            : step,
+                                    );
+                                    const next: BuilderStep = {
+                                        id: genId('s'),
+                                        kind: 'milestone',
+                                        text: ev.text,
+                                        status: 'doing',
+                                    };
+                                    return { ...m, steps: [...closed, next] };
+                                }),
+                            },
+                        };
+                    });
                     return;
                 }
 
                 if (ev.type === 'action') {
-                    setSession((prev) => {
-                        const newFiles = applyAction(prev.files, ev.action);
-                        // If the active file was deleted, fall back to the
-                        // first remaining file (or null).
-                        let activeFile = prev.activeFile;
+                    setState((s) => {
+                        if (!s.workspace) return s;
+                        const newFiles = applyAction(s.workspace.files, ev.action);
+                        let activeFile = s.workspace.activeFile;
                         if (
                             ev.action.kind === 'delete' &&
                             activeFile === ev.action.path
                         ) {
                             const keys = Object.keys(newFiles);
                             activeFile = keys[0] ?? null;
-                        } else if (ev.action.kind === 'create' || ev.action.kind === 'edit') {
-                            // Auto-open the file the agent just touched, but
-                            // only if the user isn't actively viewing another
-                            // file (we don't want to yank focus). We do swap
-                            // when there's nothing open, otherwise leave it.
-                            if (!activeFile) activeFile = ev.action.path;
+                        } else if (
+                            (ev.action.kind === 'create' || ev.action.kind === 'edit') &&
+                            !activeFile
+                        ) {
+                            activeFile = ev.action.path;
                         }
 
                         return {
-                            ...prev,
-                            files: newFiles,
-                            activeFile,
-                            updatedAt: Date.now(),
-                            messages: prev.messages.map((m) => {
-                                if (m.id !== msgId) return m;
-                                const prevSteps = m.steps ?? [];
-                                const next: BuilderStep = {
-                                    id: genId('s'),
-                                    kind: 'action',
-                                    action: ev.action,
-                                    status: 'done',
-                                };
-                                return { ...m, steps: [...prevSteps, next] };
-                            }),
+                            ...s,
+                            workspace: {
+                                ...s.workspace,
+                                files: newFiles,
+                                activeFile,
+                                updatedAt: Date.now(),
+                                messages: s.workspace.messages.map((m) => {
+                                    if (m.id !== msgId) return m;
+                                    const prevSteps = m.steps ?? [];
+                                    const next: BuilderStep = {
+                                        id: genId('s'),
+                                        kind: 'action',
+                                        action: ev.action,
+                                        status: 'done',
+                                    };
+                                    return { ...m, steps: [...prevSteps, next] };
+                                }),
+                            },
                         };
                     });
                     return;
@@ -330,22 +488,38 @@ export function useBuilderAgent(sessionId: string): UseBuilderAgentResult {
                     }));
                     return;
                 }
-
                 // 'done' is implicit — handled by the await returning.
             }
         },
-        [isStreaming, selectedModelId, sessionId, updateAssistantMessage],
+        [state.isStreaming, state.selectedModelId, workspaceId, updateAssistantMessage],
     );
 
+    const sendMessage = useCallback(
+        async (text: string) => {
+            const trimmed = text.trim();
+            if (!trimmed) return;
+            await runAgent({ newMessageText: trimmed });
+        },
+        [runAgent],
+    );
+
+    const resumePending = useCallback(async () => {
+        await runAgent({});
+    }, [runAgent]);
+
     return {
-        session,
-        isStreaming,
-        error,
-        selectedModelId,
+        workspace: state.workspace,
+        isLoading: state.isLoading,
+        loadError: state.loadError,
+        isStreaming: state.isStreaming,
+        error: state.streamError,
+        selectedModelId: state.selectedModelId,
         setSelectedModelId,
         setActiveFile,
         updateFile,
+        deleteFile,
         sendMessage,
+        resumePending,
         abort,
     };
 }
@@ -376,12 +550,11 @@ async function consumeStream(
                 const ev = JSON.parse(trimmed) as BuilderStreamEvent;
                 onEvent(ev);
             } catch {
-                // Bad line — just skip rather than tear down the whole stream.
+                // Malformed line — skip, don't tear down the stream.
             }
         }
     }
 
-    // Final partial line, if any.
     const trailing = buffer.trim();
     if (trailing) {
         try {
@@ -392,28 +565,7 @@ async function consumeStream(
     }
 }
 
-/**
- * Build a compressed transcript of an assistant message that we send back to
- * the model as conversation history. Includes a brief milestone list and
- * action summary instead of the raw token stream — this keeps the context
- * small while preserving meaning.
- */
-function renderAssistantTranscript(m: BuilderMessage): string {
-    const lines: string[] = [];
-    if (m.steps) {
-        for (const s of m.steps) {
-            if (s.kind === 'milestone') {
-                lines.push(`• ${s.text}`);
-            } else {
-                lines.push(`[${s.action.kind}] ${s.action.path}`);
-            }
-        }
-    }
-    if (m.content.trim()) lines.push(m.content.trim());
-    return lines.join('\n');
-}
-
 function deriveTitle(message: string): string {
     const words = message.split(/\s+/).slice(0, 6).join(' ');
-    return words.length > 50 ? words.slice(0, 50) + '…' : words || 'New project';
+    return words.length > 50 ? words.slice(0, 50) + '…' : words || 'New build';
 }

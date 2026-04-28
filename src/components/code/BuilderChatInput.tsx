@@ -12,7 +12,7 @@ interface BuilderChatInputProps {
     placeholder?: string;
     isStreaming?: boolean;
     disabled?: boolean;
-    /** Initial value (used to hydrate from sessionStorage on the workspace page). */
+    /** Initial value (used to seed the textarea, e.g. an editable suggestion). */
     initialValue?: string;
     onSend: (message: string) => void;
     onStop?: () => void;
@@ -25,7 +25,7 @@ interface BuilderChatInputProps {
 
 export function BuilderChatInput({
     variant = 'compact',
-    placeholder = 'Ask Builder to create or change something…',
+    placeholder = 'Ask Forge to create or change something…',
     isStreaming,
     disabled,
     initialValue = '',

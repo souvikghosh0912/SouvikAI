@@ -1,9 +1,11 @@
 /**
- * Builder workspace types.
+ * Builder (Forge) workspace types.
  *
- * The Builder is an in-browser code agent: it reasons about a request, emits
+ * The Builder is a code-generation agent: it reasons about a request, emits
  * milestones describing its plan, and applies file-system actions to a virtual
- * project. All state lives client-side (sessionStorage) — no DB tables.
+ * project. State is persisted in Supabase (`builder_workspaces`,
+ * `builder_files`, `builder_messages`) so projects survive across sessions and
+ * devices. The client mirrors that state in memory while editing.
  */
 
 /** A virtual project file system: path → file contents. */
