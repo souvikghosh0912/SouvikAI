@@ -7,6 +7,7 @@ import { Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useState } from 'react';
+import { SimpleTooltip } from '@/components/ui';
 import { MessageActions } from './MessageActions';
 import { ThinkingTimeline } from './ThinkingTimeline';
 import { MessageAttachments } from './MessageAttachments';
@@ -179,17 +180,19 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
                         <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-widest select-none">
                             {lang === 'text' ? 'plaintext' : lang}
                         </span>
-                        <button
-                            onClick={() => handleCopy(content)}
-                            className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-100/10 transition-all"
-                            title="Copy code"
-                        >
-                            {copied === content ? (
-                                <><Check className="h-3 w-3 text-success" />Copied</>
-                            ) : (
-                                <><Copy className="h-3 w-3" />Copy</>
-                            )}
-                        </button>
+                        <SimpleTooltip content={copied === content ? 'Copied to clipboard' : 'Copy code'}>
+                            <button
+                                onClick={() => handleCopy(content)}
+                                aria-label={copied === content ? 'Copied' : 'Copy code'}
+                                className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-100/10 transition-all"
+                            >
+                                {copied === content ? (
+                                    <><Check className="h-3 w-3 text-success" />Copied</>
+                                ) : (
+                                    <><Copy className="h-3 w-3" />Copy</>
+                                )}
+                            </button>
+                        </SimpleTooltip>
                     </div>
 
                     <SyntaxHighlighter

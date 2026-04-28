@@ -49,3 +49,10 @@ export {
     DropdownMenuRadioGroup,
 } from './dropdown-menu';
 export { default as ShinyText } from './ShinyText';
+export {
+    Tooltip,
+    TooltipTrigger,
+    TooltipContent,
+    TooltipProvider,
+    SimpleTooltip,
+} from './tooltip';

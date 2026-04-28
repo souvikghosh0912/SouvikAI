@@ -8,7 +8,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useChat } from '@/hooks/useChat';
 import { useQuota } from '@/hooks/useQuota';
 import { Loader2, Menu, UserCircle, Bell, Archive } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, SimpleTooltip } from '@/components/ui';
 
 interface PendingAction {
     type: 'delete' | 'archive';
@@ -157,34 +157,45 @@ function ChatPageInner() {
                 {/* Header */}
                 <header className="flex items-center justify-between px-2 md:px-3 py-2 bg-background border-b border-border-subtle sticky top-0 z-20">
                     <div className="flex items-center gap-1">
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="md:hidden h-9 w-9 text-foreground-muted hover:text-foreground hover:bg-surface-2"
-                            onClick={() => setIsSidebarOpen(true)}
-                        >
-                            <Menu className="h-5 w-5" />
-                        </Button>
-                        <ModelSelector models={models} value={selectedModelId} onValueChange={setSelectedModelId} />
+                        <SimpleTooltip content="Open menu" side="bottom">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="md:hidden h-9 w-9 text-foreground-muted hover:text-foreground hover:bg-surface-2"
+                                onClick={() => setIsSidebarOpen(true)}
+                                aria-label="Open menu"
+                            >
+                                <Menu className="h-5 w-5" />
+                            </Button>
+                        </SimpleTooltip>
+                        <SimpleTooltip content="Switch model" side="bottom">
+                            <div>
+                                <ModelSelector models={models} value={selectedModelId} onValueChange={setSelectedModelId} />
+                            </div>
+                        </SimpleTooltip>
                     </div>
 
                     <div className="flex items-center gap-1">
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-full text-foreground-muted hover:text-foreground hover:bg-surface-2"
-                            title="Account"
-                        >
-                            <UserCircle className="h-5 w-5" />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-full text-foreground-muted hover:text-foreground hover:bg-surface-2"
-                            title="Notifications"
-                        >
-                            <Bell className="h-5 w-5" />
-                        </Button>
+                        <SimpleTooltip content="Account" side="bottom">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full text-foreground-muted hover:text-foreground hover:bg-surface-2"
+                                aria-label="Account"
+                            >
+                                <UserCircle className="h-5 w-5" />
+                            </Button>
+                        </SimpleTooltip>
+                        <SimpleTooltip content="Notifications" side="bottom">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full text-foreground-muted hover:text-foreground hover:bg-surface-2"
+                                aria-label="Notifications"
+                            >
+                                <Bell className="h-5 w-5" />
+                            </Button>
+                        </SimpleTooltip>
                     </div>
                 </header>
 

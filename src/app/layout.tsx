@@ -4,6 +4,7 @@ import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ThemeProvider } from '@/components/theme-provider';
+import { TooltipProvider } from '@/components/ui';
 
 export const metadata: Metadata = {
     title: "Souvik's AI",
@@ -37,7 +38,9 @@ export default function RootLayout({
                     enableSystem
                     disableTransitionOnChange
                 >
-                    <AuthProvider>{children}</AuthProvider>
+                    <TooltipProvider delayDuration={250} skipDelayDuration={100}>
+                        <AuthProvider>{children}</AuthProvider>
+                    </TooltipProvider>
                 </ThemeProvider>
             </body>
         </html>

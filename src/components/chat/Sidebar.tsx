@@ -29,6 +29,7 @@ import {
     DropdownMenuTrigger,
     Avatar,
     AvatarFallback,
+    SimpleTooltip,
 } from '@/components/ui';
 import { ChatSession } from '@/types/chat';
 import { useAuth } from '@/hooks/useAuth';
@@ -202,20 +203,22 @@ function ChatListItem({ session, isActive, onSelect, onPin, onArchive, onDelete,
                 )}
 
                 {!isRenaming && (
-                    <button
-                        ref={btnRef}
-                        onClick={openMenu}
-                        className={cn(
-                            'shrink-0 h-6 w-6 flex items-center justify-center rounded transition-all',
-                            menuOpen
-                                ? 'bg-surface-3 text-foreground opacity-100'
-                                : 'text-foreground-subtle hover:bg-surface-3 hover:text-foreground opacity-0 group-hover:opacity-100',
-                            isActive && 'opacity-100'
-                        )}
-                        title="Options"
-                    >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                    </button>
+                    <SimpleTooltip content="More options" side="top" disabled={menuOpen}>
+                        <button
+                            ref={btnRef}
+                            onClick={openMenu}
+                            aria-label="More options"
+                            className={cn(
+                                'shrink-0 h-6 w-6 flex items-center justify-center rounded transition-all',
+                                menuOpen
+                                    ? 'bg-surface-3 text-foreground opacity-100'
+                                    : 'text-foreground-subtle hover:bg-surface-3 hover:text-foreground opacity-0 group-hover:opacity-100',
+                                isActive && 'opacity-100'
+                            )}
+                        >
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                    </SimpleTooltip>
                 )}
             </div>
 
@@ -461,13 +464,18 @@ export function Sidebar({
                         <div className={cn('flex items-center', isCollapsed ? 'justify-center' : 'pl-1')}>
                             <BrandMark withWordmark={!isCollapsed} />
                         </div>
-                        <button
-                            onClick={() => setIsCollapsed(!isCollapsed)}
-                            className="text-foreground-muted hover:text-foreground transition-colors h-7 w-7 flex items-center justify-center rounded-md hover:bg-surface-2"
-                            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                        <SimpleTooltip
+                            content={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                            side={isCollapsed ? 'right' : 'bottom'}
                         >
-                            {isCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-                        </button>
+                            <button
+                                onClick={() => setIsCollapsed(!isCollapsed)}
+                                aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                                className="text-foreground-muted hover:text-foreground transition-colors h-7 w-7 flex items-center justify-center rounded-md hover:bg-surface-2"
+                            >
+                                {isCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                            </button>
+                        </SimpleTooltip>
                     </div>
 
                     {/* ── Sticky primary nav (always pinned above chat list) ── */}
@@ -479,29 +487,44 @@ export function Sidebar({
                             const handler = isNewChat ? onNewChat : isSearch ? onSearch : undefined;
 
                             return (
-                                <button
+                                <SimpleTooltip
                                     key={item.action}
-                                    onClick={handler}
-                                    className={cn(
-                                        'w-full flex items-center text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors duration-150 rounded-md',
-                                        isCollapsed
-                                            ? 'h-8 w-8 mx-auto justify-center'
-                                            : 'gap-2.5 px-2 h-8'
-                                    )}
-                                    title={isCollapsed ? item.label : undefined}
+                                    content={
+                                        isSearch ? (
+                                            <span className="flex items-center gap-1.5">
+                                                {item.label}
+                                                <kbd className="text-[10px] font-mono bg-surface-2 border border-border rounded px-1 py-px">⌘K</kbd>
+                                            </span>
+                                        ) : (
+                                            item.label
+                                        )
+                                    }
+                                    side="right"
+                                    disabled={!isCollapsed}
                                 >
-                                    <Icon className="h-4 w-4 shrink-0" />
-                                    {!isCollapsed && (
-                                        <>
-                                            <span className="flex-1 text-left">{item.label}</span>
-                                            {isSearch && (
-                                                <kbd className="text-[10px] font-mono text-foreground-subtle bg-surface-2 border border-border rounded px-1 py-px">
-                                                    ⌘K
-                                                </kbd>
-                                            )}
-                                        </>
-                                    )}
-                                </button>
+                                    <button
+                                        onClick={handler}
+                                        aria-label={item.label}
+                                        className={cn(
+                                            'w-full flex items-center text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors duration-150 rounded-md',
+                                            isCollapsed
+                                                ? 'h-8 w-8 mx-auto justify-center'
+                                                : 'gap-2.5 px-2 h-8'
+                                        )}
+                                    >
+                                        <Icon className="h-4 w-4 shrink-0" />
+                                        {!isCollapsed && (
+                                            <>
+                                                <span className="flex-1 text-left">{item.label}</span>
+                                                {isSearch && (
+                                                    <kbd className="text-[10px] font-mono text-foreground-subtle bg-surface-2 border border-border rounded px-1 py-px">
+                                                        ⌘K
+                                                    </kbd>
+                                                )}
+                                            </>
+                                        )}
+                                    </button>
+                                </SimpleTooltip>
                             );
                         })}
                     </nav>
@@ -518,21 +541,27 @@ export function Sidebar({
                             {SCROLLABLE_NAV_ITEMS.map((item) => {
                                 const Icon = item.icon;
                                 return (
-                                    <button
+                                    <SimpleTooltip
                                         key={item.action}
-                                        className={cn(
-                                            'w-full flex items-center text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors duration-150 rounded-md',
-                                            isCollapsed
-                                                ? 'h-8 w-8 mx-auto justify-center'
-                                                : 'gap-2.5 px-2 h-8'
-                                        )}
-                                        title={isCollapsed ? item.label : undefined}
+                                        content={item.label}
+                                        side="right"
+                                        disabled={!isCollapsed}
                                     >
-                                        <Icon className="h-4 w-4 shrink-0" />
-                                        {!isCollapsed && (
-                                            <span className="flex-1 text-left">{item.label}</span>
-                                        )}
-                                    </button>
+                                        <button
+                                            aria-label={item.label}
+                                            className={cn(
+                                                'w-full flex items-center text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors duration-150 rounded-md',
+                                                isCollapsed
+                                                    ? 'h-8 w-8 mx-auto justify-center'
+                                                    : 'gap-2.5 px-2 h-8'
+                                            )}
+                                        >
+                                            <Icon className="h-4 w-4 shrink-0" />
+                                            {!isCollapsed && (
+                                                <span className="flex-1 text-left">{item.label}</span>
+                                            )}
+                                        </button>
+                                    </SimpleTooltip>
                                 );
                             })}
                         </nav>
@@ -573,23 +602,24 @@ export function Sidebar({
                         {isCollapsed && sessions.length > 0 && (
                             <div className="px-1.5 py-1 space-y-1">
                                 {sessions.slice(0, 12).map((session) => (
-                                    <button
-                                        key={session.id}
-                                        className={cn(
-                                            'w-8 h-8 mx-auto flex items-center justify-center rounded-md cursor-pointer transition-colors',
-                                            currentSessionId === session.id
-                                                ? 'bg-surface-3 text-foreground'
-                                                : 'hover:bg-surface-2 text-foreground-muted hover:text-foreground'
-                                        )}
-                                        onClick={() => onSelectSession(session.id)}
-                                        title={session.title}
-                                    >
-                                        {session.isPinned ? (
-                                            <Pin className="h-3.5 w-3.5 rotate-45" />
-                                        ) : (
-                                            <MessageSquare className="h-3.5 w-3.5" />
-                                        )}
-                                    </button>
+                                    <SimpleTooltip key={session.id} content={session.title} side="right">
+                                        <button
+                                            aria-label={session.title}
+                                            className={cn(
+                                                'w-8 h-8 mx-auto flex items-center justify-center rounded-md cursor-pointer transition-colors',
+                                                currentSessionId === session.id
+                                                    ? 'bg-surface-3 text-foreground'
+                                                    : 'hover:bg-surface-2 text-foreground-muted hover:text-foreground'
+                                            )}
+                                            onClick={() => onSelectSession(session.id)}
+                                        >
+                                            {session.isPinned ? (
+                                                <Pin className="h-3.5 w-3.5 rotate-45" />
+                                            ) : (
+                                                <MessageSquare className="h-3.5 w-3.5" />
+                                            )}
+                                        </button>
+                                    </SimpleTooltip>
                                 ))}
                             </div>
                         )}
@@ -597,21 +627,23 @@ export function Sidebar({
 
                     {/* ── View all chats ── */}
                     <div className={cn('shrink-0 border-t border-border-subtle', isCollapsed ? 'p-1.5' : 'px-2 py-1.5')}>
-                        <button
-                            onClick={goToAllChats}
-                            title={isCollapsed ? 'View all chats' : undefined}
-                            className={cn(
-                                'w-full flex items-center text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors duration-150 rounded-md',
-                                isCollapsed
-                                    ? 'h-8 w-8 mx-auto justify-center'
-                                    : 'gap-2.5 px-2 h-8'
-                            )}
-                        >
-                            <LayoutList className="h-4 w-4 shrink-0" />
-                            {!isCollapsed && (
-                                <span className="flex-1 text-left">View all chats</span>
-                            )}
-                        </button>
+                        <SimpleTooltip content="View all chats" side="right" disabled={!isCollapsed}>
+                            <button
+                                onClick={goToAllChats}
+                                aria-label="View all chats"
+                                className={cn(
+                                    'w-full flex items-center text-[13px] text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors duration-150 rounded-md',
+                                    isCollapsed
+                                        ? 'h-8 w-8 mx-auto justify-center'
+                                        : 'gap-2.5 px-2 h-8'
+                                )}
+                            >
+                                <LayoutList className="h-4 w-4 shrink-0" />
+                                {!isCollapsed && (
+                                    <span className="flex-1 text-left">View all chats</span>
+                                )}
+                            </button>
+                        </SimpleTooltip>
                     </div>
 
                     {/* ── Footer: user menu ── */}
@@ -629,14 +661,18 @@ export function Sidebar({
 
                 {/* Drag handle */}
                 {!isCollapsed && (
-                    <div
-                        onMouseDown={startDrag}
-                        className={cn(
-                            'absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-40 transition-colors',
-                            isDragging ? 'bg-ring/60' : 'hover:bg-ring/30'
-                        )}
-                        title="Drag to resize"
-                    />
+                    <SimpleTooltip content="Drag to resize" side="right" disabled={isDragging}>
+                        <div
+                            onMouseDown={startDrag}
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label="Resize sidebar"
+                            className={cn(
+                                'absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-40 transition-colors',
+                                isDragging ? 'bg-ring/60' : 'hover:bg-ring/30'
+                            )}
+                        />
+                    </SimpleTooltip>
                 )}
             </div>
 
@@ -658,27 +694,33 @@ interface UserMenuProps {
 function UserMenu({ user, displayName, initial, collapsed, onOpenSettings, onSignOut }: UserMenuProps) {
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button
-                    className={cn(
-                        'w-full flex items-center rounded-md hover:bg-surface-2 transition-colors text-left',
-                        collapsed ? 'h-8 w-8 mx-auto justify-center p-0' : 'gap-2 px-1.5 py-1.5'
-                    )}
-                    title={collapsed ? displayName : undefined}
-                >
-                    <Avatar className="h-7 w-7 shrink-0 ring-1 ring-border">
-                        <AvatarFallback className="bg-foreground text-background text-[11px] font-semibold">
-                            {initial}
-                        </AvatarFallback>
-                    </Avatar>
-                    {!collapsed && (
-                        <div className="flex-1 min-w-0">
-                            <p className="text-[13px] font-medium truncate text-foreground leading-tight">{displayName}</p>
-                            <p className="text-[11px] text-foreground-muted truncate leading-tight">Free plan</p>
-                        </div>
-                    )}
-                </button>
-            </DropdownMenuTrigger>
+            <SimpleTooltip
+                content={collapsed ? `${displayName} · Account` : 'Account'}
+                side="right"
+                disabled={!collapsed}
+            >
+                <DropdownMenuTrigger asChild>
+                    <button
+                        aria-label="Open account menu"
+                        className={cn(
+                            'w-full flex items-center rounded-md hover:bg-surface-2 transition-colors text-left',
+                            collapsed ? 'h-8 w-8 mx-auto justify-center p-0' : 'gap-2 px-1.5 py-1.5'
+                        )}
+                    >
+                        <Avatar className="h-7 w-7 shrink-0 ring-1 ring-border">
+                            <AvatarFallback className="bg-foreground text-background text-[11px] font-semibold">
+                                {initial}
+                            </AvatarFallback>
+                        </Avatar>
+                        {!collapsed && (
+                            <div className="flex-1 min-w-0">
+                                <p className="text-[13px] font-medium truncate text-foreground leading-tight">{displayName}</p>
+                                <p className="text-[11px] text-foreground-muted truncate leading-tight">Free plan</p>
+                            </div>
+                        )}
+                    </button>
+                </DropdownMenuTrigger>
+            </SimpleTooltip>
             <DropdownMenuContent align="start" className="w-56 bg-popover text-popover-foreground border-border" sideOffset={8}>
                 <div className="px-2 py-1.5 text-[11px] text-foreground-muted border-b border-border-subtle mb-1 truncate">
                     {user?.email}
