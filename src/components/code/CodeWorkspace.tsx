@@ -2,12 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import {
+    AlertTriangle,
+    ArrowLeft,
+    File as FileIcon,
+    RefreshCw,
+    Sparkles,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button, SimpleTooltip } from '@/components/ui';
 import { BuilderChatPanel } from './BuilderChatPanel';
 import { CodeEditor } from './CodeEditor';
-import { CodePreview } from './CodePreview';
+import { CodePreview, buildPreviewHTML } from './CodePreview';
 import { DiffPanel } from './DiffPanel';
 import { FileTree } from './FileTree';
 import { ViewToggle, type WorkspaceView } from './ViewToggle';
@@ -33,8 +39,8 @@ interface CodeWorkspaceProps {
 }
 
 const CHAT_WIDTH_STORAGE_KEY = 'forge:chatPanelWidth';
-const CHAT_WIDTH_DEFAULT = 380;
-const CHAT_WIDTH_MIN = 280;
+const CHAT_WIDTH_DEFAULT = 360;
+const CHAT_WIDTH_MIN = 260;
 const CHAT_WIDTH_MAX_FALLBACK = 720;
 
 function clampWidth(width: number, viewport: number): number {
@@ -52,16 +58,23 @@ function clampWidth(width: number, viewport: number): number {
  *   [ chat panel  ] | [ editor ⇄ preview ]
  *      resizable        flex-1
  *
- * The right pane swaps between the file editor and the live preview via
- * {@link ViewToggle}. On desktop the divider between the two panes can be
- * dragged to resize them; the chosen width is persisted in localStorage. On
- * mobile the layout collapses to a single column with a tab bar at the top
- * to switch between chat / editor / preview, and the resize handle is
- * hidden.
+ * The right pane swaps between the file editor, the live preview, and the
+ * pending-changes review surface via {@link ViewToggle}. A single unified
+ * toolbar (h-10) at the top of the right pane hosts the toggle plus the
+ * view-specific context (file path / preview status / pending count) and
+ * the view-specific action (preview reload). Eliminating the per-view
+ * sub-toolbars buys a row of vertical real estate and keeps all chrome on
+ * a single horizontal rhythm with the workspace header.
+ *
+ * On desktop the divider between the two panes can be dragged to resize
+ * them; the chosen width is persisted in localStorage. On mobile the
+ * layout collapses to a single column with a tab bar at the top to switch
+ * between chat / right-pane, and the resize handle is hidden.
  */
 export function CodeWorkspace(props: CodeWorkspaceProps) {
     const [view, setView] = useState<WorkspaceView>('editor');
     const [mobileTab, setMobileTab] = useState<'chat' | 'right'>('chat');
+    const [reloadKey, setReloadKey] = useState(0);
 
     // Total pending changes across all assistant messages — drives the
     // "Review" tab badge.
@@ -90,6 +103,14 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         setView('review');
         setMobileTab('right');
     }, []);
+
+    // Compile the live preview only when the preview view is active. The
+    // resulting `warning` is surfaced inline with the toolbar so users see
+    // it next to the reload control without an extra row of chrome.
+    const preview = useMemo(
+        () => (view === 'preview' ? buildPreviewHTML(props.files) : null),
+        [view, props.files],
+    );
 
     // ── Resizable left pane ────────────────────────────────────────────────
     const [isDesktop, setIsDesktop] = useState(false);
@@ -262,25 +283,40 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     const activeContent =
         props.activeFile != null ? props.files[props.activeFile] ?? '' : '';
 
+    const fileCount = Object.keys(props.files).length;
+
     return (
         <div className="flex flex-col h-screen w-full bg-background overflow-hidden">
-            {/* Top header — small, with home link + project title */}
-            <header className="shrink-0 flex items-center gap-3 h-11 px-3 border-b border-border-subtle bg-background">
+            {/* Top header — single source of truth for brand + project title. */}
+            <header className="shrink-0 flex items-center gap-2 h-10 px-3 border-b border-border-subtle bg-background">
                 <SimpleTooltip content="Back" side="bottom">
                     <Button
                         asChild
                         variant="ghost"
                         size="icon-sm"
-                        className="h-8 w-8 text-foreground-muted hover:text-foreground"
+                        className="h-7 w-7 text-foreground-muted hover:text-foreground"
                     >
                         <Link href="/code" aria-label="Back to Builder home">
                             <ArrowLeft className="h-4 w-4" />
                         </Link>
                     </Button>
                 </SimpleTooltip>
-                <div className="text-[13px] font-medium text-foreground truncate">
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="h-5 w-5 rounded-md bg-foreground text-background flex items-center justify-center">
+                        <Sparkles className="h-3 w-3" />
+                    </div>
+                    <span className="text-[13px] font-semibold text-foreground hidden sm:inline">
+                        Forge
+                    </span>
+                </div>
+
+                <span className="h-4 w-px bg-border-subtle mx-1 shrink-0" aria-hidden />
+
+                <div className="text-[13px] font-medium text-foreground truncate min-w-0">
                     {props.title}
                 </div>
+
                 <div className="flex-1" />
 
                 {/* Mobile-only segmented switch */}
@@ -321,7 +357,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                         // Desktop fallback width prior to hydration so there's
                         // no layout flash, plus border on the right when the
                         // resize handle is hidden.
-                        'md:flex md:shrink-0 md:w-[380px] border-r border-border-subtle md:border-r-0',
+                        'md:flex md:shrink-0 md:w-[360px] border-r border-border-subtle md:border-r-0',
                     )}
                 >
                     <BuilderChatPanel
@@ -375,22 +411,67 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                         'md:flex',
                     )}
                 >
-                    <div className="shrink-0 flex items-center justify-between gap-2 h-11 px-3 border-b border-border-subtle bg-background">
+                    {/* Single unified right-pane toolbar (h-10).
+                        Layout: [ViewToggle] · [contextual middle (truncates)] · [actions + counter]
+                        The middle slot adapts per view so we never need a
+                        second sub-toolbar inside the editor or preview. */}
+                    <div className="shrink-0 flex items-center gap-2 h-10 px-3 border-b border-border-subtle bg-background">
                         <ViewToggle
                             value={view}
                             onChange={setView}
                             reviewCount={pendingReviewCount}
                         />
-                        <span className="text-[11px] text-foreground-subtle">
-                            {view === 'review'
-                                ? `${pendingReviewCount} pending`
-                                : `${Object.keys(props.files).length} files`}
-                        </span>
+
+                        <div className="hidden md:flex flex-1 min-w-0 items-center gap-1.5 text-foreground-muted">
+                            {view === 'editor' && props.activeFile && (
+                                <>
+                                    <FileIcon className="h-3.5 w-3.5 shrink-0" />
+                                    <code className="font-mono text-[12px] truncate">
+                                        {props.activeFile}
+                                    </code>
+                                </>
+                            )}
+                            {view === 'preview' &&
+                                (preview?.warning ? (
+                                    <>
+                                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />
+                                        <span className="text-[12px] text-warning truncate">
+                                            {preview.warning}
+                                        </span>
+                                    </>
+                                ) : (
+                                    <span className="text-[12px]">Live preview</span>
+                                ))}
+                            {view === 'review' && (
+                                <span className="text-[12px]">Review pending changes</span>
+                            )}
+                        </div>
+
+                        <div className="ml-auto md:ml-0 flex items-center gap-2 shrink-0">
+                            {view === 'preview' && (
+                                <SimpleTooltip content="Reload preview" side="bottom">
+                                    <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        onClick={() => setReloadKey((k) => k + 1)}
+                                        aria-label="Reload preview"
+                                        className="h-7 w-7 text-foreground-muted hover:text-foreground"
+                                    >
+                                        <RefreshCw className="h-3.5 w-3.5" />
+                                    </Button>
+                                </SimpleTooltip>
+                            )}
+                            <span className="text-[11px] text-foreground-subtle tabular-nums">
+                                {view === 'review'
+                                    ? `${pendingReviewCount} pending`
+                                    : `${fileCount} ${fileCount === 1 ? 'file' : 'files'}`}
+                            </span>
+                        </div>
                     </div>
 
                     {view === 'editor' && (
                         <div className="flex-1 min-h-0 flex">
-                            <div className="w-[220px] shrink-0 border-r border-border-subtle bg-surface overflow-y-auto">
+                            <div className="w-[200px] shrink-0 border-r border-border-subtle bg-surface overflow-y-auto">
                                 <FileTree
                                     files={props.files}
                                     activeFile={props.activeFile}
@@ -408,7 +489,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                             </div>
                         </div>
                     )}
-                    {view === 'preview' && <CodePreview files={props.files} />}
+                    {view === 'preview' && preview && (
+                        <CodePreview html={preview.html} reloadKey={reloadKey} />
+                    )}
                     {view === 'review' && (
                         <DiffPanel
                             messages={props.messages}

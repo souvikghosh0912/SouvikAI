@@ -1,91 +1,65 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { useEffect, useRef } from 'react';
 import type { BuilderFiles } from '@/types/code';
 
 interface CodePreviewProps {
-    files: BuilderFiles;
+    /** Pre-compiled preview HTML, produced by {@link buildPreviewHTML}. */
+    html: string;
+    /**
+     * Bumped by the parent toolbar's reload button to force the iframe to
+     * re-evaluate the same HTML (useful when the user wants to re-run a
+     * preview that has runtime errors).
+     */
+    reloadKey?: number;
 }
 
 /**
- * Live preview for the Builder workspace.
+ * Thin sandboxed iframe shell for the Builder workspace.
  *
- * A real Next.js dev server can't run inside the browser, so we approximate
- * by compiling the project's `app/page.tsx` (or `app/layout.tsx` wrapping
- * page.tsx) as a Babel-compiled JSX component, mounting it inside an iframe,
- * and including Tailwind via its Play CDN.
- *
- * This works for self-contained components (no `import`s beyond React /
- * built-ins). Imports are detected and replaced with no-op shims so the
- * preview degrades gracefully — we surface a yellow banner so the user knows
- * the preview is best-effort.
+ * The compile + warning logic lives in {@link buildPreviewHTML} so the
+ * parent workspace toolbar can surface the warning + reload control inline
+ * with the {@link ViewToggle}, keeping the right pane to a single toolbar
+ * row.
  */
-export function CodePreview({ files }: CodePreviewProps) {
+export function CodePreview({ html, reloadKey = 0 }: CodePreviewProps) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
-    const [compileWarning, setCompileWarning] = useState<string | null>(null);
-    const [reloadKey, setReloadKey] = useState(0);
-
-    const html = useMemo(() => {
-        const result = buildPreviewHTML(files);
-        setCompileWarning(result.warning);
-        return result.html;
-    }, [files]);
 
     useEffect(() => {
         const iframe = iframeRef.current;
         if (!iframe) return;
-        // Use srcdoc for a fully isolated document. Re-assigning srcdoc forces
-        // a hard reload of the iframe, which is exactly what we want when the
-        // file map changes.
+        // Re-assigning srcdoc forces a hard reload of the iframe, which is
+        // exactly what we want when either the compiled HTML changes or the
+        // user clicks "Reload preview".
         iframe.srcdoc = html;
     }, [html, reloadKey]);
 
     return (
-        <div className="flex-1 flex flex-col min-h-0 bg-background">
-            <div className="shrink-0 flex items-center justify-between gap-2 h-9 px-3 border-b border-border-subtle bg-surface">
-                <div className="flex items-center gap-2 min-w-0">
-                    {compileWarning ? (
-                        <span className="flex items-center gap-1.5 text-[12px] text-warning truncate">
-                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{compileWarning}</span>
-                        </span>
-                    ) : (
-                        <span className="text-[12px] text-foreground-muted">Live preview</span>
-                    )}
-                </div>
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setReloadKey((k) => k + 1)}
-                    aria-label="Reload preview"
-                    className="h-7 w-7"
-                >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
-            </div>
-            <div className="flex-1 min-h-0">
-                <iframe
-                    ref={iframeRef}
-                    title="Preview"
-                    sandbox="allow-scripts allow-same-origin"
-                    className="w-full h-full bg-white"
-                />
-            </div>
+        <div className="flex-1 min-h-0 bg-background">
+            <iframe
+                ref={iframeRef}
+                title="Preview"
+                sandbox="allow-scripts allow-same-origin"
+                className="w-full h-full bg-white"
+            />
         </div>
     );
 }
 
 // ── Compilation ──────────────────────────────────────────────────────────────
 
-interface BuildResult {
+export interface PreviewBuild {
     html: string;
     warning: string | null;
 }
 
 /**
- * Best-effort transform of `app/page.tsx` into a runnable component. We:
+ * Best-effort transform of `app/page.tsx` into a runnable component for the
+ * sandboxed preview iframe. Pure function so it can be invoked from the
+ * workspace shell to drive both the toolbar (warning + status) and the
+ * iframe srcdoc with a single compile pass.
+ *
+ * Steps:
  *   1. Pick `app/page.tsx` as the entry; fall back to any `.tsx` file under app/.
  *   2. Strip `'use client'` directives.
  *   3. Replace `import` statements with comments — Babel-standalone has no
@@ -97,7 +71,7 @@ interface BuildResult {
  *   5. Replace `export default function Foo` (or `export default Foo`) with
  *      an assignment to `__BUILDER_DEFAULT_EXPORT__` that the harness mounts.
  */
-function buildPreviewHTML(files: BuilderFiles): BuildResult {
+export function buildPreviewHTML(files: BuilderFiles): PreviewBuild {
     const entryPath = pickEntryFile(files);
     if (!entryPath) {
         return {
