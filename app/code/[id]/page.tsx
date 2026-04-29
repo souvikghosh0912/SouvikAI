@@ -9,7 +9,7 @@ import { useBuilderAgent } from '@/hooks/useBuilderAgent';
 import { useModels } from '@/hooks/useModels';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui';
-import { FORGE_NEXT_MODEL_KEY } from '../page';
+import { FORGE_NEXT_MODEL_KEY } from '@/lib/codeHandoff';
 
 export default function BuilderWorkspacePage() {
     const params = useParams<{ id: string }>();
