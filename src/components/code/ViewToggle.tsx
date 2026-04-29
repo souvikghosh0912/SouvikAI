@@ -71,7 +71,7 @@ function ToggleButton({
             onClick={onClick}
             aria-pressed={active}
             className={cn(
-                'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12px] font-medium transition-colors',
+                'inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] font-medium transition-colors',
                 active
                     ? 'bg-background text-foreground shadow-sm'
                     : tone === 'attention'
