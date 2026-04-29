@@ -3,6 +3,7 @@ import type { BuilderWorkspaceSummary } from '@/types/code';
 import { SidebarHeader } from './SidebarHeader';
 import { SidebarNav } from './SidebarNav';
 import { WorkspaceList } from './WorkspaceList';
+import { CodeSearchModal } from './CodeSearchModal';
 
 const FAVORITES_KEY = 'code-favorites';
 
@@ -10,6 +11,7 @@ export function CodeSidebar() {
     const [workspaces, setWorkspaces] = useState<BuilderWorkspaceSummary[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [favorites, setFavorites] = useState<Set<string>>(new Set());
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
 
     // Load favorites from localStorage
     useEffect(() => {
@@ -98,7 +100,7 @@ export function CodeSidebar() {
 
     return (
         <aside className="w-[260px] h-full flex flex-col bg-surface border-r border-border shrink-0 select-none">
-            <SidebarHeader />
+            <SidebarHeader onOpenSearch={() => setIsSearchOpen(true)} />
             <SidebarNav />
             <WorkspaceList
                 workspaces={workspaces}
@@ -107,6 +109,12 @@ export function CodeSidebar() {
                 onToggleFavorite={handleToggleFavorite}
                 onRename={handleRename}
                 onDelete={handleDelete}
+            />
+            
+            <CodeSearchModal
+                open={isSearchOpen}
+                onClose={() => setIsSearchOpen(false)}
+                workspaces={workspaces}
             />
         </aside>
     );
