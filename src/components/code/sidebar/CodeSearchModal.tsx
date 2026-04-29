@@ -35,8 +35,7 @@ export function CodeSearchModal({ open, onClose, workspaces }: CodeSearchModalPr
     }, [router, onClose]);
 
     const handleAllRecentChats = useCallback(() => {
-        // Just redirect to code home or a specific chats page if it exists
-        router.push('/code');
+        router.push('/code/chats');
         onClose();
     }, [router, onClose]);
 
