@@ -3,7 +3,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from '@/lib/supabase/client';
 
-const supabase = createClient();
+// Lazy-instantiated client so that importing this module never throws
+// at evaluation time when Supabase env vars are missing (e.g. in v0's
+// preview/template renderer).
+let _supabase: ReturnType<typeof createClient> | null = null;
+function supabase() {
+    if (!_supabase) _supabase = createClient();
+    return _supabase;
+}
 
 // Cache for preloaded data
 const preloadCache = {
@@ -22,7 +29,7 @@ export function preloadSessions(userId: string): Promise<any[]> {
     }
 
     const promise = Promise.resolve(
-        supabase
+        supabase()
             .from('chat_sessions')
             .select('*')
             .eq('user_id', userId)
@@ -48,7 +55,7 @@ export function preloadProfile(userId: string): Promise<any> {
     }
 
     const promise = Promise.resolve(
-        supabase
+        supabase()
             .from('profiles')
             .select('*')
             .eq('id', userId)
