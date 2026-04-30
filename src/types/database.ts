@@ -224,6 +224,38 @@ export interface Database {
                     created_at?: string;
                 };
             };
+            models: {
+                Row: {
+                    id: string;
+                    name: string;
+                    display_name: string;
+                    quota_limit: number;
+                    is_suspended: boolean;
+                    provider: 'nvidia' | 'google';
+                    created_at: string;
+                    updated_at: string;
+                };
+                Insert: {
+                    id?: string;
+                    name: string;
+                    display_name: string;
+                    quota_limit?: number;
+                    is_suspended?: boolean;
+                    provider?: 'nvidia' | 'google';
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Update: {
+                    id?: string;
+                    name?: string;
+                    display_name?: string;
+                    quota_limit?: number;
+                    is_suspended?: boolean;
+                    provider?: 'nvidia' | 'google';
+                    created_at?: string;
+                    updated_at?: string;
+                };
+            };
             admin_settings: {
                 Row: {
                     id: number;

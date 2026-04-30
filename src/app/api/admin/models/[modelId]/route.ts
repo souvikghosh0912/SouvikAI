@@ -27,6 +27,15 @@ export async function PUT(
         if (body.displayName !== undefined) updates.display_name = body.displayName;
         if (body.is_suspended !== undefined) updates.is_suspended = body.is_suspended;
         if (body.quota_limit !== undefined) updates.quota_limit = body.quota_limit;
+        if (body.provider !== undefined) {
+            if (!['nvidia', 'google'].includes(body.provider)) {
+                return NextResponse.json(
+                    { error: `Invalid provider "${body.provider}". Must be 'nvidia' or 'google'.` },
+                    { status: 400 },
+                );
+            }
+            updates.provider = body.provider;
+        }
 
         if (Object.keys(updates).length === 0) {
             return NextResponse.json({ error: 'No fields to update' }, { status: 400 });

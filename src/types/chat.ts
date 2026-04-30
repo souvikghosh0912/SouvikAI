@@ -65,6 +65,8 @@ export interface AIModel {
     displayName: string;
     quota_limit: number;
     is_suspended: boolean;
+    /** AI backend used to serve this model. */
+    provider: 'nvidia' | 'google';
 }
 
 

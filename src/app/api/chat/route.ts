@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { streamNvidiaCompletion, parseSSEStream } from '@/lib/nvidia-nim';
+import { streamGoogleCompletion } from '@/lib/google-ai';
 import { Database } from '@/types/database';
 import type { AttachmentPayload } from '@/types/attachments';
 
@@ -16,6 +17,7 @@ import { surfaceServerError } from '@/lib/api/error-response';
 import { getChatSystemPrompt } from '@/lib/system-prompt-loader';
 import {
     CHAT_NVIDIA_TIMEOUT_MS,
+    CHAT_GOOGLE_TIMEOUT_MS,
     DEFAULT_QUOTA_LIMIT,
     MAX_CHAT_HISTORY_TURNS,
     MAX_INPUT_CHARS,
@@ -174,22 +176,36 @@ export async function POST(request: NextRequest) {
         const temperature = adminSettings?.temperature ?? 0.7;
         const maxTokens = adminSettings?.max_tokens ?? 1024;
         const modelName = dbModel.name || adminSettings?.model_name || 'meta/llama-3.1-8b-instruct';
+        const provider: 'nvidia' | 'google' = (dbModel.provider ?? 'nvidia') as 'nvidia' | 'google';
 
+        const timeoutMs = provider === 'google' ? CHAT_GOOGLE_TIMEOUT_MS : CHAT_NVIDIA_TIMEOUT_MS;
         const timeoutController = new AbortController();
-        const timeoutId = setTimeout(() => timeoutController.abort(), CHAT_NVIDIA_TIMEOUT_MS);
+        const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
-        let stream: ReadableStream<Uint8Array>;
+        // textStream is a ReadableStream<string> regardless of provider —
+        // google-ai.ts and parseSSEStream(nvidia) both expose the same surface.
+        let textStream: ReadableStream<string>;
         try {
-            stream = await streamNvidiaCompletion(apiMessages, {
-                model: modelName,
-                temperature,
-                maxTokens,
-                signal: timeoutController.signal,
-            });
+            if (provider === 'google') {
+                textStream = await streamGoogleCompletion(apiMessages, {
+                    model: modelName,
+                    temperature,
+                    maxTokens,
+                    signal: timeoutController.signal,
+                });
+            } else {
+                const rawStream = await streamNvidiaCompletion(apiMessages, {
+                    model: modelName,
+                    temperature,
+                    maxTokens,
+                    signal: timeoutController.signal,
+                });
+                textStream = parseSSEStream(rawStream);
+            }
         } catch (err) {
             clearTimeout(timeoutId);
             const isTimeout = (err as Error)?.name === 'AbortError';
-            console.error('[Chat] NVIDIA stream error:', err);
+            console.error(`[Chat] ${provider} stream error:`, err);
             return NextResponse.json(
                 {
                     error: isTimeout
@@ -201,7 +217,6 @@ export async function POST(request: NextRequest) {
         }
 
         clearTimeout(timeoutId);
-        const textStream = parseSSEStream(stream);
         const reader = textStream.getReader();
         const encoder = new TextEncoder();
 
