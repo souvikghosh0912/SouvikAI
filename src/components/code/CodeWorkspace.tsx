@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-    AlertTriangle,
     ArrowLeft,
     File as FileIcon,
     RefreshCw,
@@ -17,7 +16,7 @@ import { EditorTabs } from '../editor/EditorTabs';
 import { Breadcrumb } from '../editor/Breadcrumb';
 import { Minimap } from '../editor/Minimap';
 import { StatusBar } from '../editor/StatusBar';
-import { CodePreview, buildPreviewHTML } from './CodePreview';
+import { CodePreview } from './CodePreview';
 import { DiffPanel } from './DiffPanel';
 import { FileTree } from './FileTree';
 import { ViewToggle, type WorkspaceView } from './ViewToggle';
@@ -121,13 +120,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         setMobileTab('right');
     }, []);
 
-    // Compile the live preview only when the preview view is active. The
-    // resulting `warning` is surfaced inline with the toolbar so users see
-    // it next to the reload control without an extra row of chrome.
-    const preview = useMemo(
-        () => (view === 'preview' ? buildPreviewHTML(props.files) : null),
-        [view, props.files],
-    );
+
 
     // ── Resizable left pane ────────────────────────────────────────────────
     const [isDesktop, setIsDesktop] = useState(false);
@@ -448,17 +441,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                                     </code>
                                 </>
                             )}
-                            {view === 'preview' &&
-                                (preview?.warning ? (
-                                    <>
-                                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />
-                                        <span className="text-[12px] text-warning truncate">
-                                            {preview.warning}
-                                        </span>
-                                    </>
-                                ) : (
-                                    <span className="text-[12px]">Live preview</span>
-                                ))}
+                            {view === 'preview' && (
+                                <span className="text-[12px]">Live preview</span>
+                            )}
                             {view === 'review' && (
                                 <span className="text-[12px]">Review pending changes</span>
                             )}
@@ -535,8 +520,8 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                             </div>
                         </div>
                     )}
-                    {view === 'preview' && preview && (
-                        <CodePreview html={preview.html} reloadKey={reloadKey} />
+                    {view === 'preview' && (
+                        <CodePreview files={props.files} reloadKey={reloadKey} />
                     )}
                     {view === 'review' && (
                         <DiffPanel
