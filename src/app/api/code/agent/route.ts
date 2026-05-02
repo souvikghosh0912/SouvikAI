@@ -169,6 +169,7 @@ export async function POST(request: NextRequest) {
         const maxTokens = Math.max(adminSettings?.max_tokens ?? 0, 4096);
         const modelName: string =
             dbModel.name || adminSettings?.model_name || 'meta/llama-3.1-8b-instruct';
+        const provider: 'nvidia' | 'google' = (dbModel.provider ?? 'nvidia') as 'nvidia' | 'google';
 
         // ── Run the agent and stream NDJSON back ────────────────────────────
         const out = runAgentTurn({
@@ -179,6 +180,7 @@ export async function POST(request: NextRequest) {
             modelName,
             temperature,
             maxTokens,
+            provider,
             apiMessages,
         });
 

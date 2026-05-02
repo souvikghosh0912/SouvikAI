@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { streamNvidiaCompletion, parseSSEStream } from '@/lib/nvidia-nim';
+import { streamGoogleCompletion, GeminiMessage } from '@/lib/google-ai';
 import { buildBuilderSystemPrompt } from './system-prompt';
 import { BuilderTagStreamParser } from './parser';
 import { renderReadToolResult } from './tools/read';
@@ -8,7 +9,7 @@ import { createThinkStripper } from './think-stripper';
 import { encodeEvent } from './ndjson-emit';
 import { createTurnAccumulator } from './timeline';
 import { estimateTokens, recordTokenUsage } from '@/lib/api/quota';
-import { BUILDER_NVIDIA_TIMEOUT_MS } from '@/lib/limits';
+import { BUILDER_NVIDIA_TIMEOUT_MS, BUILDER_GOOGLE_TIMEOUT_MS } from '@/lib/limits';
 
 /**
  * One "turn" from the user's perspective may be split into several phases
@@ -26,6 +27,8 @@ export interface AgentRunOptions {
     modelName: string;
     temperature: number;
     maxTokens: number;
+    /** Which AI provider backs this model. */
+    provider: 'nvidia' | 'google';
     /** Initial messages array (system + history + final user turn). */
     apiMessages: Array<{ role: string; content: string }>;
 }
@@ -51,6 +54,7 @@ export function runAgentTurn(opts: AgentRunOptions): ReadableStream<Uint8Array> 
         modelName,
         temperature,
         maxTokens,
+        provider,
         apiMessages,
     } = opts;
 
@@ -61,8 +65,9 @@ export function runAgentTurn(opts: AgentRunOptions): ReadableStream<Uint8Array> 
     );
 
     let activeReader: ReadableStreamDefaultReader<string> | null = null;
+    const timeoutMs = provider === 'google' ? BUILDER_GOOGLE_TIMEOUT_MS : BUILDER_NVIDIA_TIMEOUT_MS;
     const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => timeoutController.abort(), BUILDER_NVIDIA_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
     return new ReadableStream<Uint8Array>({
         async start(controller) {
@@ -73,16 +78,38 @@ export function runAgentTurn(opts: AgentRunOptions): ReadableStream<Uint8Array> 
                 for (let phase = 1; phase <= MAX_AGENT_PHASES; phase++) {
                     acc.startPhase();
 
-                    let upstream: ReadableStream<Uint8Array>;
+                    // textReader is a ReadableStream<string> regardless of
+                    // provider — google-ai and parseSSEStream(nvidia) both
+                    // expose the same surface.
+                    let textReader: ReadableStreamDefaultReader<string>;
                     try {
-                        upstream = await streamNvidiaCompletion(phaseMessages as any, {
-                            model: modelName,
-                            temperature,
-                            maxTokens,
-                            signal: timeoutController.signal,
-                        });
+                        if (provider === 'google') {
+                            const googleStream = await streamGoogleCompletion(
+                                phaseMessages as GeminiMessage[],
+                                {
+                                    model: modelName,
+                                    temperature,
+                                    maxTokens,
+                                    signal: timeoutController.signal,
+                                },
+                            );
+                            textReader = googleStream.getReader();
+                        } else {
+                            const upstream = await streamNvidiaCompletion(phaseMessages as any, {
+                                model: modelName,
+                                temperature,
+                                maxTokens,
+                                signal: timeoutController.signal,
+                            });
+                            textReader = parseSSEStream(upstream).getReader();
+                        }
                     } catch (err) {
-                        const isTimeout = (err as Error)?.name === 'AbortError';
+                        // Node 18+ wraps an aborted fetch in a TypeError whose
+                        // .cause is the real AbortError — check both layers.
+                        const cause = (err as NodeJS.ErrnoException)?.cause as Error | undefined;
+                        const isTimeout =
+                            (err as Error)?.name === 'AbortError' ||
+                            cause?.name === 'AbortError';
                         console.error('[Builder Agent] upstream error:', err);
                         controller.enqueue(
                             encodeEvent({
@@ -96,7 +123,7 @@ export function runAgentTurn(opts: AgentRunOptions): ReadableStream<Uint8Array> 
                         break;
                     }
 
-                    const reader = parseSSEStream(upstream).getReader();
+                    const reader = textReader;
                     activeReader = reader;
                     const parser = new BuilderTagStreamParser();
                     const stripThink = createThinkStripper();
