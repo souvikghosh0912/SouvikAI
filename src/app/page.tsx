@@ -198,6 +198,20 @@ function ChatPageInner() {
         setPendingAction(null);
     }, [pendingAction, deleteSession, archiveSession]);
 
+    const handleEditImage = useCallback((prompt: string, imageSrc: string) => {
+        const attachment = {
+            id: crypto.randomUUID(),
+            kind: 'image' as const,
+            name: 'edited-image.png',
+            sizeBytes: 0, // Mock size since it's an existing image
+            mimeType: 'image/png',
+            base64: imageSrc.replace(/^data:image\/[a-z]+;base64,/, ''),
+            thumbnail: imageSrc.replace(/^data:image\/[a-z]+;base64,/, ''),
+        };
+        sendMessage(prompt, [attachment], 'editImage');
+    }, [sendMessage]);
+
+
     if (authLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background">
@@ -311,6 +325,7 @@ function ChatPageInner() {
                         onPendingMessageConsumed={() => setPendingMessage('')}
                         branchedFromTitle={currentSessionBranchedFromTitle}
                         onToolChange={setActiveTool}
+                        onEditImage={handleEditImage}
                     />
                 </div>
 
