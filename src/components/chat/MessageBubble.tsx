@@ -118,7 +118,7 @@ interface MessageBubbleProps {
     onEditImage?: (prompt: string, imageSrc: string) => void;
 }
 
-export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbleProps) {
+export function MessageBubble({ message, isLoading, onRegenerate, onEditImage }: MessageBubbleProps) {
     const isUser = message.role === 'user';
     const { preferences } = useChatPreferences();
     const [copied, setCopied] = useState<string | null>(null);
