@@ -269,7 +269,7 @@ export function useChat() {
                 let imageUrl: string | null = null;
                 let errorMsg: string | null = null;
                 try {
-                    const payload: any = { prompt: content };
+                    const payload: { prompt: string; editImage?: string } = { prompt: content };
                     if (tool === 'editImage' && attachmentPayloads[0]?.base64) {
                         payload.editImage = attachmentPayloads[0].base64;
                     }
