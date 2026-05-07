@@ -1,8 +1,9 @@
 /**
- * Generates an image using the NVIDIA NIM qwen/qwen-image model.
+ * Generates an image using the NVIDIA NIM qwen/qwen-image model via the
+ * OpenAI-compatible images/generations endpoint exposed on the NVIDIA cloud.
  *
- * The endpoint returns a JSON body with an `artifacts` array where each
- * element carries a `base64` field containing the PNG-encoded image.
+ * Endpoint: POST https://integrate.api.nvidia.com/v1/images/generations
+ * Response: OpenAI-compatible → data[0].b64_json (base64-encoded PNG)
  *
  * @returns A data-URL string (`data:image/png;base64,…`) ready for an <img> tag.
  */
@@ -18,35 +19,39 @@ export async function generateNvidiaImage(
         throw new Error('NVIDIA NIM API key not configured');
     }
 
-    const response = await fetch('https://integrate.api.nvidia.com/v1/infer', {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
+    const response = await fetch(
+        'https://integrate.api.nvidia.com/v1/images/generations',
+        {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'qwen/qwen-image-2512',
+                prompt,
+                n: 1,
+                response_format: 'b64_json',
+            }),
+            signal: options.signal,
         },
-        body: JSON.stringify({
-            model: 'qwen/qwen-image',
-            prompt,
-            seed: options.seed ?? 0,
-        }),
-        signal: options.signal,
-    });
+    );
 
     if (!response.ok) {
         const errorText = await response.text().catch(() => response.statusText);
         throw new Error(`NVIDIA image API error (${response.status}): ${errorText}`);
     }
 
+    // OpenAI-compatible response: { data: [{ b64_json: "..." }] }
     const data = (await response.json()) as {
-        artifacts?: { base64?: string }[];
-        seed?: number;
+        data?: { b64_json?: string }[];
     };
 
-    const base64 = data.artifacts?.[0]?.base64;
-    if (!base64) {
+    const b64 = data.data?.[0]?.b64_json;
+    if (!b64) {
         throw new Error('NVIDIA image API returned no image data');
     }
 
-    return `data:image/png;base64,${base64}`;
+    return `data:image/png;base64,${b64}`;
 }
