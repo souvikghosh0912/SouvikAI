@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { generateNvidiaImage } from '@/lib/nvidia-image';
+import { generateNvidiaImage, editNvidiaImage } from '@/lib/nvidia-image';
 import { rejectCrossOrigin } from '@/lib/api/origin-guard';
 import { surfaceServerError } from '@/lib/api/error-response';
 
@@ -28,21 +28,27 @@ export async function POST(request: NextRequest) {
         }
 
         // ── Body parsing ─────────────────────────────────────────────────────
-        const { prompt } = await request.json();
+        const { prompt, editImage } = await request.json();
         if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
             return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
         }
 
-        // ── Generate image ───────────────────────────────────────────────────
+        // ── Generate or Edit image ───────────────────────────────────────────
         const controller = new AbortController();
         // 90s hard timeout — image generation is slow
         const timeoutId = setTimeout(() => controller.abort(), 90_000);
 
         let imageUrl: string;
         try {
-            imageUrl = await generateNvidiaImage(prompt.trim(), {
-                signal: controller.signal,
-            });
+            if (editImage) {
+                imageUrl = await editNvidiaImage(prompt.trim(), editImage, {
+                    signal: controller.signal,
+                });
+            } else {
+                imageUrl = await generateNvidiaImage(prompt.trim(), {
+                    signal: controller.signal,
+                });
+            }
         } catch (err: any) {
             clearTimeout(timeoutId);
             const cause = err?.cause as Error | undefined;

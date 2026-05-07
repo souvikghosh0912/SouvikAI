@@ -8,17 +8,22 @@ interface ImageLightboxProps {
     src: string | null;
     alt?: string;
     onClose: () => void;
+    onEdit?: (prompt: string, imageSrc: string) => void;
 }
 
 /**
  * Fullscreen lightbox used to peek at attached images (input previews and
  * persisted message attachments). Closes on backdrop click or ESC key.
  */
-export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
+export function ImageLightbox({ src, alt, onClose, onEdit }: ImageLightboxProps) {
     const open = !!src;
+    const [editPrompt, setEditPrompt] = React.useState('');
 
     React.useEffect(() => {
-        if (!open) return;
+        if (!open) {
+            setEditPrompt('');
+            return;
+        }
         const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
         window.addEventListener('keydown', onKey);
         // Prevent body scroll while open
@@ -41,6 +46,13 @@ export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
         document.body.removeChild(a);
     };
 
+    const handleEditSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editPrompt.trim() || !onEdit) return;
+        onEdit(editPrompt.trim(), src);
+        onClose();
+    };
+
     return (
         <div
             role="dialog"
@@ -48,7 +60,7 @@ export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
             aria-label={alt || 'Image preview'}
             onClick={onClose}
             className={cn(
-                'fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10',
+                'fixed inset-0 z-[100] flex flex-col items-center justify-center p-4 md:p-10',
                 'bg-background/85 backdrop-blur-md animate-in fade-in-0 duration-150',
             )}
         >
@@ -92,10 +104,38 @@ export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
                 alt={alt || ''}
                 onClick={(e) => e.stopPropagation()}
                 className={cn(
-                    'max-h-[88vh] max-w-[92vw] object-contain rounded-xl shadow-2xl',
+                    'max-h-[80vh] max-w-[92vw] object-contain rounded-xl shadow-2xl flex-shrink',
                     'animate-in zoom-in-95 duration-200',
                 )}
             />
+
+            {/* Bottom edit bar */}
+            {onEdit && (
+                <div 
+                    className="absolute bottom-6 w-full max-w-lg px-4"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <form 
+                        onSubmit={handleEditSubmit}
+                        className="flex items-center gap-2 bg-card border border-border rounded-full p-1.5 shadow-xl animate-in slide-in-from-bottom-4 duration-300"
+                    >
+                        <input
+                            type="text"
+                            value={editPrompt}
+                            onChange={(e) => setEditPrompt(e.target.value)}
+                            placeholder="Describe edits..."
+                            className="flex-1 bg-transparent border-none outline-none text-sm px-4 placeholder:text-muted-foreground"
+                        />
+                        <button
+                            type="submit"
+                            disabled={!editPrompt.trim()}
+                            className="flex-shrink-0 bg-primary text-primary-foreground h-8 px-4 rounded-full text-sm font-medium disabled:opacity-50 transition-opacity"
+                        >
+                            Edit
+                        </button>
+                    </form>
+                </div>
+            )}
         </div>
     );
 }

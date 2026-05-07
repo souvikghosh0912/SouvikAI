@@ -257,7 +257,7 @@ export function useChat() {
             const customSystemPrompt = composeCustomSystemPrompt(preferences);
 
             // ── Image generation tool ────────────────────────────────────────
-            if (tool === 'createImage') {
+            if (tool === 'createImage' || tool === 'editImage') {
                 // Mark the assistant bubble as generating an image.
                 setState((prev) => ({
                     ...prev,
@@ -269,10 +269,15 @@ export function useChat() {
                 let imageUrl: string | null = null;
                 let errorMsg: string | null = null;
                 try {
+                    const payload: any = { prompt: content };
+                    if (tool === 'editImage' && attachmentPayloads[0]?.base64) {
+                        payload.editImage = attachmentPayloads[0].base64;
+                    }
+
                     const res = await fetch('/api/image', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt: content }),
+                        body: JSON.stringify(payload),
                         signal: abortControllerRef.current.signal,
                     });
                     const data = await res.json();

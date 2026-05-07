@@ -30,13 +30,15 @@ interface ChatContainerProps {
      * the very top: "Branched from <title>".
      */
     branchedFromTitle?: string | null;
+    /** Called when the user submits an image edit prompt from the lightbox. */
+    onEditImage?: (prompt: string, imageSrc: string) => void;
 }
 
 export function ChatContainer({
     messages, isLoading, error,
     onSend, onStop, onRegenerate,
     onSuggestionSelect, pendingMessage, onPendingMessageConsumed,
-    branchedFromTitle, onToolChange,
+    branchedFromTitle, onToolChange, onEditImage,
 }: ChatContainerProps) {
     const { preferences } = useChatPreferences();
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -107,6 +109,7 @@ export function ChatContainer({
                             message={msg}
                             isLoading={isLoading && index === messages.length - 1 && msg.role === 'assistant'}
                             onRegenerate={onRegenerate}
+                            onEditImage={onEditImage}
                         />
                     ))}
                     {error && (

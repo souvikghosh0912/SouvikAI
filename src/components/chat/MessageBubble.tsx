@@ -52,9 +52,10 @@ function extractLang(className?: string): string {
 interface ImageMessageBlockProps {
     imageUrl: string;
     prompt?: string;
+    onEditImage?: (prompt: string, imageSrc: string) => void;
 }
 
-function ImageMessageBlock({ imageUrl, prompt }: ImageMessageBlockProps) {
+function ImageMessageBlock({ imageUrl, prompt, onEditImage }: ImageMessageBlockProps) {
     const [lightboxOpen, setLightboxOpen] = useState(false);
 
     const handleDownload = useCallback(() => {
@@ -101,6 +102,7 @@ function ImageMessageBlock({ imageUrl, prompt }: ImageMessageBlockProps) {
                 src={lightboxOpen ? imageUrl : null}
                 alt={prompt || 'Generated image'}
                 onClose={() => setLightboxOpen(false)}
+                onEdit={onEditImage}
             />
         </>
     );
@@ -113,6 +115,7 @@ interface MessageBubbleProps {
     isLoading?: boolean;
     /** Called when the user requests a fresh response for this assistant message. */
     onRegenerate?: (assistantMessageId: string) => void;
+    onEditImage?: (prompt: string, imageSrc: string) => void;
 }
 
 export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbleProps) {
@@ -377,7 +380,11 @@ export function MessageBubble({ message, isLoading, onRegenerate }: MessageBubbl
 
                 {/* Generated image */}
                 {message.imageUrl && (
-                    <ImageMessageBlock imageUrl={message.imageUrl} prompt={message.content} />
+                    <ImageMessageBlock 
+                        imageUrl={message.imageUrl} 
+                        prompt={message.content} 
+                        onEditImage={onEditImage}
+                    />
                 )}
 
                 {/* Markdown body */}
