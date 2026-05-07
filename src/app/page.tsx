@@ -47,6 +47,7 @@ function ChatPageInner() {
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
     const [pendingMessage, setPendingMessage] = useState('');
+    const [activeTool, setActiveTool] = useState<string | null>(null);
     const consumedSessionParamRef = useRef<string | null>(null);
     const consumedProjectParamRef = useRef<string | null>(null);
     /**
@@ -254,7 +255,12 @@ function ChatPageInner() {
                         </SimpleTooltip>
                         <SimpleTooltip content="Switch model" side="bottom">
                             <div>
-                                <ModelSelector models={models} value={selectedModelId} onValueChange={setSelectedModelId} />
+                                <ModelSelector
+                                    models={models}
+                                    value={selectedModelId}
+                                    onValueChange={setSelectedModelId}
+                                    isImageTool={activeTool === 'createImage'}
+                                />
                             </div>
                         </SimpleTooltip>
                     </div>
@@ -304,6 +310,7 @@ function ChatPageInner() {
                         pendingMessage={pendingMessage}
                         onPendingMessageConsumed={() => setPendingMessage('')}
                         branchedFromTitle={currentSessionBranchedFromTitle}
+                        onToolChange={setActiveTool}
                     />
                 </div>
 
@@ -321,6 +328,7 @@ function ChatPageInner() {
                             onSend={(msg, attachments, tool) => sendMessage(msg, attachments, tool)}
                             onStop={abortRequest}
                             isLoading={isLoading}
+                            onToolChange={setActiveTool}
                         />
                     </div>
                 )}

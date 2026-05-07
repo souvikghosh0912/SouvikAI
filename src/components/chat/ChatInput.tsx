@@ -46,6 +46,8 @@ export interface ChatInputProps {
     disabled?: boolean;
     pendingMessage?: string;
     onPendingMessageConsumed?: () => void;
+    /** Called whenever the active tool changes (so the parent can update the ModelSelector). */
+    onToolChange?: (tool: string | null) => void;
 }
 
 export function ChatInput({
@@ -54,7 +56,8 @@ export function ChatInput({
     isLoading,
     disabled,
     pendingMessage,
-    onPendingMessageConsumed
+    onPendingMessageConsumed,
+    onToolChange,
 }: ChatInputProps) {
     const { preferences } = useChatPreferences();
     const { attachments, isProcessing, processingError, addFiles, removeAttachment, clearAttachments } = useAttachments();
@@ -105,6 +108,7 @@ export function ChatInput({
             setValue('');
             clearAttachments();
             setSelectedTool(null);
+            onToolChange?.(null);
             if (internalTextareaRef.current) {
                 internalTextareaRef.current.style.height = "auto";
             }
@@ -273,7 +277,7 @@ export function ChatInput({
                             <PopoverContent side="top" align="start">
                             <div className="flex flex-col gap-1">
                                 {toolsList.map(tool => ( 
-                                    <button key={tool.id} onClick={() => { setSelectedTool(tool.id); setIsPopoverOpen(false); }} className="flex w-full items-center gap-2 rounded-md p-2 text-left text-sm text-popover-foreground hover:bg-surface-2"> 
+                                    <button key={tool.id} onClick={() => { setSelectedTool(tool.id); onToolChange?.(tool.id); setIsPopoverOpen(false); }} className="flex w-full items-center gap-2 rounded-md p-2 text-left text-sm text-popover-foreground hover:bg-surface-2"> 
                                         <tool.icon className="h-4 w-4" /> 
                                         <span>{tool.name}</span> 
                                         {tool.extra && <span className="ml-auto text-xs text-foreground-subtle">{tool.extra}</span>} 
@@ -286,7 +290,7 @@ export function ChatInput({
                         {activeTool && (
                             <>
                             <div className="h-4 w-px bg-border" />
-                            <button onClick={() => setSelectedTool(null)} className="flex h-8 items-center gap-2 rounded-full px-2 text-sm hover:bg-surface-2 cursor-pointer text-brand transition-colors flex-row items-center justify-center">
+                            <button onClick={() => { setSelectedTool(null); onToolChange?.(null); }} className="flex h-8 items-center gap-2 rounded-full px-2 text-sm hover:bg-surface-2 cursor-pointer text-brand transition-colors flex-row items-center justify-center">
                                 {ActiveToolIcon && <ActiveToolIcon className="h-4 w-4" />}
                                 {activeTool.shortName}
                                 <XIcon className="h-4 w-4" />

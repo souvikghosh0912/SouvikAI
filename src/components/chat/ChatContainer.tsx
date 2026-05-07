@@ -22,6 +22,8 @@ interface ChatContainerProps {
     /** Pre-fills the empty-state ChatInput (lifted from parent). */
     pendingMessage?: string;
     onPendingMessageConsumed?: () => void;
+    /** Called whenever the active tool in ChatInput changes (lifted to page level). */
+    onToolChange?: (tool: string | null) => void;
     /**
      * If the active session was created via "Branch", this is the snapshot
      * of the source chat's title. The conversation view shows a divider at
@@ -34,7 +36,7 @@ export function ChatContainer({
     messages, isLoading, error,
     onSend, onStop, onRegenerate,
     onSuggestionSelect, pendingMessage, onPendingMessageConsumed,
-    branchedFromTitle,
+    branchedFromTitle, onToolChange,
 }: ChatContainerProps) {
     const { preferences } = useChatPreferences();
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -63,6 +65,7 @@ export function ChatContainer({
                                 isLoading={isLoading}
                                 pendingMessage={pendingMessage}
                                 onPendingMessageConsumed={onPendingMessageConsumed}
+                                onToolChange={onToolChange}
                             />
                         </div>
                     )}

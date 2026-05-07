@@ -209,6 +209,26 @@
     }
 }
 
+@keyframes image-shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+@keyframes image-pulse {
+    0%, 100% {
+        opacity: 0.4;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
 .animate-fade-in {
     animation: fadeIn 0.2s ease-out;
 }

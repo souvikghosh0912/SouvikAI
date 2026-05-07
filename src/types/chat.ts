@@ -25,6 +25,16 @@ export interface Message {
     webSearch?: WebSearchState;
     /** Present on user messages with files attached — used to render previews in the bubble. */
     attachments?: MessageAttachment[];
+    /**
+     * When the `createImage` tool was used, the assistant message carries the
+     * generated image as a data-URL (`data:image/png;base64,…`).
+     */
+    imageUrl?: string;
+    /**
+     * True while the image is being generated — drives the loading skeleton.
+     * Cleared once `imageUrl` is set or an error occurs.
+     */
+    isImageGenerating?: boolean;
 }
 
 export interface ChatSession {

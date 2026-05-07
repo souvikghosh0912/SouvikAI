@@ -256,6 +256,76 @@ export function useChat() {
         try {
             const customSystemPrompt = composeCustomSystemPrompt(preferences);
 
+            // ── Image generation tool ────────────────────────────────────────
+            if (tool === 'createImage') {
+                // Mark the assistant bubble as generating an image.
+                setState((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) =>
+                        m.id === assistantId ? { ...m, isImageGenerating: true } : m
+                    ),
+                }));
+
+                let imageUrl: string | null = null;
+                let errorMsg: string | null = null;
+                try {
+                    const res = await fetch('/api/image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt: content }),
+                        signal: abortControllerRef.current.signal,
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.imageUrl) {
+                        imageUrl = data.imageUrl as string;
+                    } else {
+                        errorMsg = data.error || 'Image generation failed';
+                    }
+                } catch (err) {
+                    errorMsg = (err as Error).name === 'AbortError'
+                        ? 'Request was cancelled'
+                        : (err as Error).message;
+                }
+
+                const finalImageContent = imageUrl ? '' : (errorMsg ?? 'Image generation failed');
+
+                setState((prev) => ({
+                    ...prev,
+                    isLoading: false,
+                    messages: prev.messages.map((m) =>
+                        m.id === assistantId
+                            ? {
+                                  ...m,
+                                  content: finalImageContent,
+                                  imageUrl: imageUrl ?? undefined,
+                                  isImageGenerating: false,
+                              }
+                            : m
+                    ),
+                }));
+
+                await insertAssistantMessage(supabase, {
+                    id: assistantId,
+                    sessionId,
+                    userId: user.id,
+                    content: finalImageContent || '[Generated image]',
+                });
+
+                if (isFirstMessage) {
+                    generateAndApplyTitle({
+                        sessionId,
+                        userMessage: content,
+                        assistantMessage: imageUrl ? '[Image generated]' : (errorMsg ?? ''),
+                        onTitleResolved: (title) => {
+                            setSessions((prev) =>
+                                prev.map((s) => (s.id === sessionId ? { ...s, title } : s))
+                            );
+                        },
+                    });
+                }
+                return;
+            }
+
             const finalContent = await runChatCompletion({
                 sessionId,
                 userMessageId: userMessage.id,
