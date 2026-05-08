@@ -81,11 +81,8 @@ export async function editNvidiaImage(
         throw new Error('NVIDIA NIM API key not configured');
     }
 
-    // The API expects a full data URL, e.g., "data:image/png;base64,..."
-    // Ensure imageB64 is prefixed properly if it isn't already.
-    const finalImageStr = imageB64.startsWith('data:') 
-        ? imageB64 
-        : `data:image/png;base64,${imageB64}`;
+    // The API expects raw base64 without the data URI prefix
+    const finalImageStr = imageB64.replace(/^data:image\/[a-z]+;base64,/, '');
 
     const response = await fetch(
         'https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-kontext-dev',
