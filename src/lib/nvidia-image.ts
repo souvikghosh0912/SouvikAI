@@ -95,7 +95,7 @@ export async function editNvidiaImage(
             },
             body: JSON.stringify({
                 prompt,
-                image: finalImageStr,
+                image: { b64_json: finalImageStr },
                 aspect_ratio: 'match_input_image',
                 steps: 30,
                 cfg_scale: 3.5,
