@@ -234,7 +234,7 @@ export function FileTree({ files, activeFile, onSelectFile }: FileTreeProps) {
 
     if (rows.length === 0) {
         return (
-            <div className="text-[12px] text-foreground-subtle py-4 px-3">
+            <div className="text-[12px] text-editor-fg-subtle py-4 px-3">
                 No files yet.
             </div>
         );
@@ -249,7 +249,7 @@ export function FileTree({ files, activeFile, onSelectFile }: FileTreeProps) {
             aria-label="Project files"
             aria-multiselectable={false}
             onKeyDown={handleKeyDown}
-            className="text-[13px] text-foreground-muted py-2 select-none focus:outline-none"
+            className="text-[13px] text-editor-fg-muted py-1 select-none focus:outline-none"
         >
             {rows.map(({ node, depth }) => {
                 const isActive = activeFile === node.path;
@@ -275,11 +275,11 @@ export function FileTree({ files, activeFile, onSelectFile }: FileTreeProps) {
                         onFocus={() => setFocusedPath(node.path)}
                         style={{ paddingLeft: 8 + depth * 12 + (node.isDir ? 0 : 16) }}
                         className={cn(
-                            'flex items-center gap-1.5 h-7 pr-2 cursor-pointer rounded transition-colors',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                            'flex items-center gap-1.5 h-[22px] pr-2 cursor-pointer transition-colors',
+                            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-editor-accent',
                             isActive
-                                ? 'bg-surface-3 text-foreground'
-                                : 'hover:bg-surface-2 hover:text-foreground',
+                                ? 'bg-editor-bg-3 text-editor-fg'
+                                : 'text-editor-fg-muted hover:bg-editor-bg-3 hover:text-editor-fg',
                         )}
                     >
                         {node.isDir ? (
