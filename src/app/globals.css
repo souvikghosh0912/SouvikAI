@@ -8,6 +8,46 @@
 
 @layer base {
     :root {
+        /* ──────────────────────────────────────────────────────────────
+           Editor tokens (light)
+           Used by CodeMirror, EditorTabs, Breadcrumb, Minimap, StatusBar.
+           Override via [data-editor-theme="hc"] for high contrast.
+           ────────────────────────────────────────────────────────────── */
+        --editor-bg: 0 0% 100%;
+        --editor-bg-2: 0 0% 96%;
+        --editor-bg-3: 0 0% 92%;
+        --editor-fg: 0 0% 15%;
+        --editor-fg-muted: 0 0% 42%;
+        --editor-fg-subtle: 0 0% 30%;
+        --editor-border: 0 0% 88%;
+        --editor-border-strong: 0 0% 78%;
+        --editor-active-line: 210 100% 97%;
+        --editor-selection: 210 100% 82%;
+        --editor-cursor: 0 0% 0%;
+        --editor-accent: 207 100% 42%;
+        --editor-accent-fg: 0 0% 100%;
+        --editor-gutter-bg: 0 0% 98%;
+        --editor-gutter-fg: 0 0% 55%;
+        --editor-gutter-active-fg: 0 0% 15%;
+        --editor-tab-active: 0 0% 100%;
+        --editor-tab-inactive: 0 0% 95%;
+        --editor-tab-bar: 0 0% 92%;
+        --editor-find-match: 51 100% 50%;
+        --editor-find-match-active: 30 100% 50%;
+        --editor-status-bg: 207 100% 42%;
+        --editor-status-fg: 0 0% 100%;
+        --editor-syntax-keyword: 270 70% 45%;
+        --editor-syntax-string: 25 80% 38%;
+        --editor-syntax-number: 145 70% 30%;
+        --editor-syntax-comment: 0 0% 50%;
+        --editor-syntax-function: 207 100% 38%;
+        --editor-syntax-type: 200 80% 35%;
+        --editor-syntax-variable: 0 0% 15%;
+        --editor-syntax-tag: 5 70% 45%;
+        --editor-syntax-attr: 30 80% 38%;
+        --editor-syntax-property: 207 100% 38%;
+        --editor-syntax-operator: 0 0% 25%;
+
         /* Surfaces */
         --background: 0 0% 100%;
         --surface: 0 0% 100%;
@@ -56,6 +96,42 @@
     }
 
     .dark {
+        /* Editor tokens (dark) — VS Code-inspired neutral grays */
+        --editor-bg: 0 0% 12%;
+        --editor-bg-2: 0 0% 15%;
+        --editor-bg-3: 0 0% 18%;
+        --editor-fg: 0 0% 83%;
+        --editor-fg-muted: 0 0% 52%;
+        --editor-fg-subtle: 0 0% 80%;
+        --editor-border: 0 0% 24%;
+        --editor-border-strong: 0 0% 32%;
+        --editor-active-line: 0 0% 16%;
+        --editor-selection: 210 60% 30%;
+        --editor-cursor: 0 0% 100%;
+        --editor-accent: 207 100% 50%;
+        --editor-accent-fg: 0 0% 100%;
+        --editor-gutter-bg: 0 0% 12%;
+        --editor-gutter-fg: 0 0% 52%;
+        --editor-gutter-active-fg: 0 0% 90%;
+        --editor-tab-active: 0 0% 12%;
+        --editor-tab-inactive: 0 0% 18%;
+        --editor-tab-bar: 0 0% 18%;
+        --editor-find-match: 51 100% 50%;
+        --editor-find-match-active: 30 100% 50%;
+        --editor-status-bg: 207 100% 42%;
+        --editor-status-fg: 0 0% 100%;
+        --editor-syntax-keyword: 207 61% 59%;
+        --editor-syntax-string: 17 47% 64%;
+        --editor-syntax-number: 99 28% 73%;
+        --editor-syntax-comment: 101 29% 47%;
+        --editor-syntax-function: 40 91% 73%;
+        --editor-syntax-type: 188 56% 60%;
+        --editor-syntax-variable: 207 67% 78%;
+        --editor-syntax-tag: 207 61% 59%;
+        --editor-syntax-attr: 40 91% 73%;
+        --editor-syntax-property: 207 67% 78%;
+        --editor-syntax-operator: 0 0% 83%;
+
         --background: 0 0% 6%;
         --surface: 0 0% 7.5%;
         --surface-2: 0 0% 11%;
@@ -92,6 +168,48 @@
         --accent-foreground: var(--foreground);
         --input: var(--border-strong);
     }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Editor: high-contrast override
+   Applied via [data-editor-theme="hc"] on the editor scope only, so the rest
+   of the app keeps its normal styling. Targets WCAG AAA (≥ 7:1 body text).
+   ────────────────────────────────────────────────────────────────────────── */
+[data-editor-theme="hc"] {
+    --editor-bg: 0 0% 0%;
+    --editor-bg-2: 0 0% 6%;
+    --editor-bg-3: 0 0% 12%;
+    --editor-fg: 0 0% 100%;
+    --editor-fg-muted: 0 0% 92%;
+    --editor-fg-subtle: 0 0% 96%;
+    --editor-border: 60 100% 50%;
+    --editor-border-strong: 60 100% 50%;
+    --editor-active-line: 240 100% 18%;
+    --editor-selection: 240 100% 35%;
+    --editor-cursor: 60 100% 50%;
+    --editor-accent: 60 100% 50%;
+    --editor-accent-fg: 0 0% 0%;
+    --editor-gutter-bg: 0 0% 0%;
+    --editor-gutter-fg: 0 0% 95%;
+    --editor-gutter-active-fg: 60 100% 50%;
+    --editor-tab-active: 0 0% 0%;
+    --editor-tab-inactive: 0 0% 8%;
+    --editor-tab-bar: 0 0% 4%;
+    --editor-find-match: 60 100% 50%;
+    --editor-find-match-active: 30 100% 50%;
+    --editor-status-bg: 60 100% 50%;
+    --editor-status-fg: 0 0% 0%;
+    --editor-syntax-keyword: 195 100% 65%;
+    --editor-syntax-string: 25 100% 70%;
+    --editor-syntax-number: 95 100% 70%;
+    --editor-syntax-comment: 0 0% 75%;
+    --editor-syntax-function: 50 100% 70%;
+    --editor-syntax-type: 165 100% 70%;
+    --editor-syntax-variable: 0 0% 100%;
+    --editor-syntax-tag: 195 100% 65%;
+    --editor-syntax-attr: 50 100% 70%;
+    --editor-syntax-property: 0 0% 100%;
+    --editor-syntax-operator: 0 0% 100%;
 }
 
 @layer base {
@@ -317,4 +435,141 @@
 
 .sidebar-drawer-closing {
     animation: slideOutLeft 0.2s ease-in forwards;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   CodeMirror — token-driven theme.
+   The colors come from --editor-* tokens declared above so the editor
+   automatically follows the app theme (and switches to high-contrast when
+   data-editor-theme="hc" is set on the editor scope).
+   ────────────────────────────────────────────────────────────────────────── */
+.cm-editor {
+    height: 100%;
+    background: hsl(var(--editor-bg));
+    color: hsl(var(--editor-fg));
+    font-family: var(--editor-font, 'JetBrains Mono', 'Fira Code', ui-monospace, Menlo, monospace);
+    font-size: var(--editor-font-size, 13px);
+    line-height: 1.55;
+}
+
+.cm-editor.cm-focused {
+    outline: none;
+}
+
+.cm-scroller {
+    font-family: inherit;
+    overflow: auto;
+}
+
+.cm-content {
+    padding: 12px 0;
+    caret-color: hsl(var(--editor-cursor));
+}
+
+.cm-line {
+    padding: 0 12px;
+}
+
+.cm-cursor,
+.cm-dropCursor {
+    border-left-color: hsl(var(--editor-cursor));
+    border-left-width: 2px;
+}
+
+.cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground,
+.cm-editor ::selection {
+    background: hsl(var(--editor-selection)) !important;
+}
+
+.cm-gutters {
+    background: hsl(var(--editor-gutter-bg));
+    color: hsl(var(--editor-gutter-fg));
+    border-right: 1px solid hsl(var(--editor-border));
+    user-select: none;
+}
+
+.cm-gutterElement {
+    padding: 0 12px 0 16px;
+}
+
+.cm-activeLine {
+    background: hsl(var(--editor-active-line));
+}
+
+.cm-activeLineGutter {
+    background: hsl(var(--editor-active-line));
+    color: hsl(var(--editor-gutter-active-fg));
+}
+
+.cm-searchMatch {
+    background: hsl(var(--editor-find-match) / 0.35);
+    outline: 1px solid hsl(var(--editor-find-match) / 0.6);
+}
+
+.cm-searchMatch-selected {
+    background: hsl(var(--editor-find-match-active) / 0.55);
+    outline: 1px solid hsl(var(--editor-find-match-active));
+}
+
+.cm-matchingBracket,
+.cm-nonmatchingBracket {
+    background: hsl(var(--editor-fg) / 0.12);
+    outline: 1px solid hsl(var(--editor-fg) / 0.25);
+}
+
+.cm-tooltip {
+    background: hsl(var(--editor-bg-2));
+    color: hsl(var(--editor-fg));
+    border: 1px solid hsl(var(--editor-border));
+    border-radius: 6px;
+}
+
+.cm-tooltip-autocomplete > ul > li[aria-selected] {
+    background: hsl(var(--editor-accent));
+    color: hsl(var(--editor-accent-fg));
+}
+
+.cm-panels {
+    background: hsl(var(--editor-bg-2));
+    color: hsl(var(--editor-fg));
+    border-bottom: 1px solid hsl(var(--editor-border));
+}
+
+.cm-panels.cm-panels-bottom {
+    border-top: 1px solid hsl(var(--editor-border));
+}
+
+.cm-textfield {
+    background: hsl(var(--editor-bg-3));
+    color: hsl(var(--editor-fg));
+    border: 1px solid hsl(var(--editor-border-strong));
+    border-radius: 4px;
+    padding: 2px 6px;
+}
+
+.cm-textfield:focus {
+    outline: 2px solid hsl(var(--editor-accent));
+    outline-offset: -1px;
+    border-color: transparent;
+}
+
+.cm-button {
+    background: hsl(var(--editor-bg-3));
+    color: hsl(var(--editor-fg));
+    border: 1px solid hsl(var(--editor-border-strong));
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+}
+
+.cm-button:hover {
+    background: hsl(var(--editor-accent) / 0.2);
+}
+
+/* Reduced motion — kill CodeMirror's animated cursor blink */
+@media (prefers-reduced-motion: reduce) {
+    .cm-cursor {
+        animation: none !important;
+    }
 }

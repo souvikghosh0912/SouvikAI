@@ -1,296 +1,314 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useImperativeHandle, useRef, forwardRef } from 'react';
 import { File } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Search, X, ChevronDown, ChevronUp, Replace } from 'lucide-react';
+import { Compartment, EditorState, Prec } from '@codemirror/state';
+import {
+    EditorView,
+    keymap,
+    lineNumbers,
+    highlightActiveLine,
+    highlightActiveLineGutter,
+    drawSelection,
+    dropCursor,
+    rectangularSelection,
+    crosshairCursor,
+    highlightSpecialChars,
+} from '@codemirror/view';
+import {
+    defaultKeymap,
+    history,
+    historyKeymap,
+    indentWithTab,
+} from '@codemirror/commands';
+import {
+    syntaxHighlighting,
+    indentOnInput,
+    bracketMatching,
+    foldGutter,
+    foldKeymap,
+    indentUnit,
+} from '@codemirror/language';
+import {
+    searchKeymap,
+    highlightSelectionMatches,
+    search,
+} from '@codemirror/search';
+import {
+    autocompletion,
+    closeBrackets,
+    closeBracketsKeymap,
+    completionKeymap,
+} from '@codemirror/autocomplete';
+import { editorHighlightStyle } from '@/lib/editor/highlight-style';
+import { loadLanguage } from '@/lib/editor/language';
+import { useEditorSettings } from './EditorSettingsProvider';
 
 interface CodeEditorProps {
     path: string | null;
     value: string;
     onChange: (content: string) => void;
     onPositionChange?: (line: number, col: number) => void;
-    scrollRef?: React.RefObject<HTMLDivElement | null>;
+    /** Optional ref for the host element so the parent can read scroll
+        position (used by the Minimap). */
+    hostRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-const LINE_HEIGHT = 19; // px — must match CSS
-const FONT_SIZE = 13;
-const FONT_FAMILY = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace";
-const GUTTER_WIDTH = 56; // px
+export interface CodeEditorHandle {
+    focus(): void;
+    openSearch(): void;
+    /** Trigger the named CodeMirror command. Used by the command palette. */
+    runCommand(name: 'search' | 'replace' | 'gotoLine' | 'foldAll' | 'unfoldAll'): void;
+}
 
-const EXT_TO_LANG: Record<string, string> = {
-    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-    py: 'python', rs: 'rust', go: 'go', html: 'html', css: 'css', scss: 'scss',
-    json: 'json', md: 'markdown', sql: 'sql', sh: 'bash', yaml: 'yaml', yml: 'yaml',
-    java: 'java', xml: 'xml', graphql: 'graphql',
-};
+/**
+ * CodeMirror 6 editor. Boots once, then reconfigures language / theme /
+ * settings via {@link Compartment}s instead of being torn down on each
+ * change. Document state is owned by the parent — local edits flow out
+ * through `onChange`, and external (AI-streamed) updates flow in via the
+ * `value` prop.
+ */
+export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEditor(
+    { path, value, onChange, onPositionChange, hostRef: externalHostRef },
+    ref,
+) {
+    const internalHostRef = useRef<HTMLDivElement>(null);
+    const hostRef = externalHostRef ?? internalHostRef;
+    const viewRef = useRef<EditorView | null>(null);
 
-export function CodeEditor({ path, value, onChange, onPositionChange, scrollRef }: CodeEditorProps) {
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const [showFind, setShowFind] = useState(false);
-    const [showReplace, setShowReplace] = useState(false);
-    const [findQuery, setFindQuery] = useState('');
-    const [replaceValue, setReplaceValue] = useState('');
-    const [matchIndex, setMatchIndex] = useState(0);
-    const findInputRef = useRef<HTMLInputElement>(null);
+    const { settings } = useEditorSettings();
 
-    const language = useMemo(() => {
-        if (!path) return 'plaintext';
-        const ext = path.split('.').pop()?.toLowerCase() ?? '';
-        return EXT_TO_LANG[ext] ?? 'plaintext';
+    // Stable refs for callbacks so the editor doesn't have to be rebuilt
+    // when the parent re-renders.
+    const onChangeRef = useRef(onChange);
+    const onPosRef = useRef(onPositionChange);
+    onChangeRef.current = onChange;
+    onPosRef.current = onPositionChange;
+
+    // Compartments for hot-swappable extensions.
+    const langComp = useRef(new Compartment());
+    const tabComp = useRef(new Compartment());
+    const wrapComp = useRef(new Compartment());
+    const lineNumComp = useRef(new Compartment());
+    const activeLineComp = useRef(new Compartment());
+    const fontComp = useRef(new Compartment());
+
+    // Build the view once.
+    useEffect(() => {
+        if (!hostRef.current) return;
+        if (viewRef.current) return;
+
+        const updateListener = EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+                onChangeRef.current(update.state.doc.toString());
+            }
+            if (update.selectionSet || update.docChanged) {
+                const head = update.state.selection.main.head;
+                const line = update.state.doc.lineAt(head);
+                onPosRef.current?.(line.number, head - line.from + 1);
+            }
+        });
+
+        const state = EditorState.create({
+            doc: value,
+            extensions: [
+                lineNumComp.current.of(settings.lineNumbers ? lineNumbers() : []),
+                highlightActiveLineGutter(),
+                highlightSpecialChars(),
+                history(),
+                foldGutter(),
+                drawSelection(),
+                dropCursor(),
+                EditorState.allowMultipleSelections.of(true),
+                indentOnInput(),
+                tabComp.current.of([
+                    indentUnit.of(
+                        settings.insertSpaces ? ' '.repeat(settings.tabSize) : '\t',
+                    ),
+                    EditorState.tabSize.of(settings.tabSize),
+                ]),
+                wrapComp.current.of(settings.wordWrap ? EditorView.lineWrapping : []),
+                fontComp.current.of(
+                    EditorView.theme({
+                        '&': { fontSize: `${settings.fontSize}px` },
+                    }),
+                ),
+                syntaxHighlighting(editorHighlightStyle, { fallback: true }),
+                bracketMatching(),
+                closeBrackets(),
+                autocompletion({ activateOnTyping: true }),
+                rectangularSelection(),
+                crosshairCursor(),
+                activeLineComp.current.of(
+                    settings.highlightActiveLine ? highlightActiveLine() : [],
+                ),
+                highlightSelectionMatches(),
+                search({ top: true }),
+                Prec.high(
+                    keymap.of([
+                        ...closeBracketsKeymap,
+                        ...defaultKeymap,
+                        ...searchKeymap,
+                        ...historyKeymap,
+                        ...foldKeymap,
+                        ...completionKeymap,
+                        indentWithTab,
+                    ]),
+                ),
+                EditorView.contentAttributes.of({
+                    'aria-label': path
+                        ? `Code editor: ${path}`
+                        : 'Code editor',
+                    'aria-multiline': 'true',
+                    'aria-describedby': 'editor-status-bar',
+                    role: 'textbox',
+                }),
+                EditorView.editorAttributes.of({
+                    'aria-roledescription': 'code editor',
+                }),
+                langComp.current.of([]),
+                updateListener,
+            ],
+        });
+
+        const view = new EditorView({ state, parent: hostRef.current });
+        viewRef.current = view;
+
+        return () => {
+            view.destroy();
+            viewRef.current = null;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Sync external value -> view (e.g. AI streams new content for the
+    // active file). Skipped when the doc already matches to avoid
+    // looping with our own onChange.
+    useEffect(() => {
+        const view = viewRef.current;
+        if (!view) return;
+        const current = view.state.doc.toString();
+        if (current === value) return;
+        view.dispatch({
+            changes: { from: 0, to: current.length, insert: value },
+        });
+    }, [value]);
+
+    // Reset history & cursor when switching files.
+    useEffect(() => {
+        const view = viewRef.current;
+        if (!view) return;
+        view.dispatch({
+            selection: { anchor: 0 },
+            scrollIntoView: true,
+        });
+        // Force a fresh history boundary so undo doesn't bridge files.
+        view.dispatch({ userEvent: 'select.pointer' });
     }, [path]);
 
-    const lines = value.split('\n');
-
-    // ── Cursor position tracking ────────────────────────────────────────────
-    const handleSelect = useCallback(() => {
-        const ta = textareaRef.current;
-        if (!ta || !onPositionChange) return;
-        const before = value.slice(0, ta.selectionStart);
-        const linesBefore = before.split('\n');
-        onPositionChange(linesBefore.length, linesBefore[linesBefore.length - 1].length + 1);
-    }, [value, onPositionChange]);
-
-    // ── Keyboard shortcuts ──────────────────────────────────────────────────
-    const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        const ta = e.currentTarget;
-
-        // Find
-        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-            e.preventDefault();
-            setShowFind(true);
-            setTimeout(() => findInputRef.current?.focus(), 50);
-            return;
-        }
-
-        // Tab — insert 2 spaces
-        if (e.key === 'Tab') {
-            e.preventDefault();
-            const start = ta.selectionStart;
-            const end = ta.selectionEnd;
-            const newVal = value.slice(0, start) + '  ' + value.slice(end);
-            onChange(newVal);
-            requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 2; });
-            return;
-        }
-
-        // Auto-indent on Enter
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const start = ta.selectionStart;
-            const lineStart = value.lastIndexOf('\n', start - 1) + 1;
-            const currentLine = value.slice(lineStart, start);
-            const indent = currentLine.match(/^(\s*)/)?.[1] ?? '';
-            const extra = /[{([<]$/.test(currentLine.trim()) ? '  ' : '';
-            const ins = '\n' + indent + extra;
-            const newVal = value.slice(0, start) + ins + value.slice(ta.selectionEnd);
-            onChange(newVal);
-            requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + ins.length; });
-            return;
-        }
-
-        // Auto-close brackets/quotes
-        const pairs: Record<string, string> = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
-        if (pairs[e.key] && ta.selectionStart === ta.selectionEnd) {
-            e.preventDefault();
-            const start = ta.selectionStart;
-            const ins = e.key + pairs[e.key];
-            const newVal = value.slice(0, start) + ins + value.slice(start);
-            onChange(newVal);
-            requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 1; });
-            return;
-        }
-    }, [value, onChange]);
-
-    // ── Find & Replace ──────────────────────────────────────────────────────
-    const matches = useMemo(() => {
-        if (!findQuery) return [];
-        const result: number[] = [];
-        let idx = 0;
-        const lower = value.toLowerCase();
-        const query = findQuery.toLowerCase();
-        while ((idx = lower.indexOf(query, idx)) !== -1) {
-            result.push(idx);
-            idx += query.length;
-        }
-        return result;
-    }, [value, findQuery]);
-
-    const jumpToMatch = useCallback((idx: number) => {
-        const ta = textareaRef.current;
-        if (!ta || matches.length === 0) return;
-        const i = ((idx % matches.length) + matches.length) % matches.length;
-        setMatchIndex(i);
-        ta.focus();
-        ta.setSelectionRange(matches[i], matches[i] + findQuery.length);
-    }, [matches, findQuery]);
-
-    const replaceNext = useCallback(() => {
-        if (matches.length === 0) return;
-        const pos = matches[matchIndex % matches.length];
-        const newVal = value.slice(0, pos) + replaceValue + value.slice(pos + findQuery.length);
-        onChange(newVal);
-    }, [matches, matchIndex, value, findQuery, replaceValue, onChange]);
-
-    const replaceAll = useCallback(() => {
-        if (!findQuery) return;
-        onChange(value.replaceAll(findQuery, replaceValue));
-    }, [value, findQuery, replaceValue, onChange]);
-
+    // Reload language on path change.
     useEffect(() => {
-        if (!showFind) { setFindQuery(''); setMatchIndex(0); }
-    }, [showFind]);
+        let cancelled = false;
+        loadLanguage(path).then((ext) => {
+            if (cancelled) return;
+            const view = viewRef.current;
+            if (!view) return;
+            view.dispatch({
+                effects: langComp.current.reconfigure(ext ? [ext] : []),
+            });
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [path]);
 
-    // ── Sync textarea scroll with external scroll container ─────────────────
+    // Re-apply settings when they change.
     useEffect(() => {
-        const container = scrollRef?.current;
-        const ta = textareaRef.current;
-        if (!container || !ta) return;
-        const sync = () => { ta.scrollTop = container.scrollTop; };
-        container.addEventListener('scroll', sync);
-        return () => container.removeEventListener('scroll', sync);
-    }, [scrollRef]);
+        const view = viewRef.current;
+        if (!view) return;
+        view.dispatch({
+            effects: [
+                lineNumComp.current.reconfigure(
+                    settings.lineNumbers ? lineNumbers() : [],
+                ),
+                tabComp.current.reconfigure([
+                    indentUnit.of(
+                        settings.insertSpaces ? ' '.repeat(settings.tabSize) : '\t',
+                    ),
+                    EditorState.tabSize.of(settings.tabSize),
+                ]),
+                wrapComp.current.reconfigure(
+                    settings.wordWrap ? EditorView.lineWrapping : [],
+                ),
+                activeLineComp.current.reconfigure(
+                    settings.highlightActiveLine ? highlightActiveLine() : [],
+                ),
+                fontComp.current.reconfigure(
+                    EditorView.theme({
+                        '&': { fontSize: `${settings.fontSize}px` },
+                    }),
+                ),
+            ],
+        });
+    }, [
+        settings.lineNumbers,
+        settings.tabSize,
+        settings.insertSpaces,
+        settings.wordWrap,
+        settings.highlightActiveLine,
+        settings.fontSize,
+    ]);
+
+    useImperativeHandle(ref, () => ({
+        focus() {
+            viewRef.current?.focus();
+        },
+        openSearch() {
+            const view = viewRef.current;
+            if (!view) return;
+            // Lazy import to avoid a hard dependency at module load.
+            import('@codemirror/search').then(({ openSearchPanel }) => {
+                openSearchPanel(view);
+            });
+        },
+        runCommand(name) {
+            const view = viewRef.current;
+            if (!view) return;
+            import('@codemirror/search').then((s) => {
+                if (name === 'search') s.openSearchPanel(view);
+                if (name === 'replace') {
+                    s.openSearchPanel(view);
+                    // Replace toggle is handled inside CM's panel UI.
+                }
+                if (name === 'gotoLine') s.gotoLine(view);
+            });
+            if (name === 'foldAll') {
+                import('@codemirror/language').then((l) => l.foldAll(view));
+            }
+            if (name === 'unfoldAll') {
+                import('@codemirror/language').then((l) => l.unfoldAll(view));
+            }
+        },
+    }));
 
     if (!path) {
         return (
-            <div className="flex-1 flex items-center justify-center text-foreground-subtle text-[13px]">
+            <div
+                className="flex-1 flex items-center justify-center bg-editor-bg text-editor-fg-muted text-[13px]"
+                role="status"
+            >
                 <div className="flex flex-col items-center gap-2">
-                    <File className="h-5 w-5" />
+                    <File className="h-5 w-5" aria-hidden="true" />
                     <span>Select a file to start editing</span>
                 </div>
             </div>
         );
     }
 
-    const customStyle: React.CSSProperties = {
-        margin: 0,
-        padding: `12px 12px 12px ${GUTTER_WIDTH}px`,
-        background: 'transparent',
-        fontSize: FONT_SIZE,
-        fontFamily: FONT_FAMILY,
-        lineHeight: `${LINE_HEIGHT}px`,
-        minHeight: '100%',
-        whiteSpace: 'pre',
-        overflowWrap: 'normal',
-        wordBreak: 'normal',
-        tabSize: 2,
-    };
-
-    const codeTagStyle: React.CSSProperties = {
-        fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE,
-        lineHeight: `${LINE_HEIGHT}px`,
-        display: 'block',
-    };
-
     return (
-        <div className="flex flex-col h-full relative flex-1 min-h-0 bg-[#1e1e1e]">
-            {/* Find / Replace bar */}
-            {showFind && (
-                <div className="absolute top-2 right-4 z-20 bg-[#252526] border border-[#3e3e42] rounded-lg shadow-xl p-2 w-80 flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
-                        <Search className="w-3.5 h-3.5 text-[#858585] shrink-0" />
-                        <input
-                            ref={findInputRef}
-                            value={findQuery}
-                            onChange={e => { setFindQuery(e.target.value); setMatchIndex(0); }}
-                            onKeyDown={e => {
-                                if (e.key === 'Enter') jumpToMatch(matchIndex + (e.shiftKey ? -1 : 1));
-                                if (e.key === 'Escape') setShowFind(false);
-                            }}
-                            placeholder="Find"
-                            className="flex-1 bg-[#3c3c3c] text-[#d4d4d4] text-[13px] px-2 py-1 rounded border border-[#3e3e42] outline-none focus:border-[#0078d4]"
-                        />
-                        <span className="text-[10px] text-[#858585] shrink-0">
-                            {matches.length > 0 ? `${(matchIndex % matches.length) + 1}/${matches.length}` : '0/0'}
-                        </span>
-                        <button onClick={() => jumpToMatch(matchIndex - 1)} className="text-[#858585] hover:text-[#d4d4d4]">
-                            <ChevronUp className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => jumpToMatch(matchIndex + 1)} className="text-[#858585] hover:text-[#d4d4d4]">
-                            <ChevronDown className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => setShowReplace(v => !v)} title="Toggle Replace" className="text-[#858585] hover:text-[#d4d4d4]">
-                            <Replace className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => setShowFind(false)} className="text-[#858585] hover:text-[#d4d4d4]">
-                            <X className="w-3.5 h-3.5" />
-                        </button>
-                    </div>
-
-                    {showReplace && (
-                        <div className="flex items-center gap-2">
-                            <div className="w-3.5" />
-                            <input
-                                value={replaceValue}
-                                onChange={e => setReplaceValue(e.target.value)}
-                                placeholder="Replace"
-                                className="flex-1 bg-[#3c3c3c] text-[#d4d4d4] text-[13px] px-2 py-1 rounded border border-[#3e3e42] outline-none focus:border-[#0078d4]"
-                            />
-                            <button onClick={replaceNext} className="text-xs text-[#d4d4d4] bg-[#0078d4]/20 hover:bg-[#0078d4]/40 px-2 py-1 rounded transition-colors">
-                                Replace
-                            </button>
-                            <button onClick={replaceAll} className="text-xs text-[#d4d4d4] bg-[#0078d4]/20 hover:bg-[#0078d4]/40 px-2 py-1 rounded transition-colors">
-                                All
-                            </button>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Editor area */}
-            <div className="flex-1 relative overflow-auto scrollbar-thin scrollbar-thumb-white/10" ref={scrollRef as React.RefObject<HTMLDivElement>}>
-                {/* Line numbers gutter */}
-                <div
-                    className="absolute top-0 left-0 bottom-0 flex flex-col pt-3 pb-3 text-right pr-3 text-[#858585] text-[13px] select-none pointer-events-none z-10 bg-[#1e1e1e]"
-                    style={{ width: GUTTER_WIDTH, fontFamily: FONT_FAMILY, lineHeight: `${LINE_HEIGHT}px` }}
-                >
-                    {lines.map((_, i) => (
-                        <span key={i} className="leading-none" style={{ height: LINE_HEIGHT }}>{i + 1}</span>
-                    ))}
-                </div>
-
-                {/* Highlighted code layer */}
-                <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                    <SyntaxHighlighter
-                        language={language}
-                        style={vscDarkPlus}
-                        customStyle={customStyle}
-                        codeTagProps={{ style: codeTagStyle }}
-                        wrapLongLines={false}
-                        PreTag="div"
-                    >
-                        {value + '\n'}
-                    </SyntaxHighlighter>
-                </div>
-
-                {/* Transparent textarea for input */}
-                <textarea
-                    ref={textareaRef}
-                    value={value}
-                    onChange={e => onChange(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    onSelect={handleSelect}
-                    onClick={handleSelect}
-                    spellCheck={false}
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    data-gramm="false"
-                    className="absolute inset-0 resize-none outline-none caret-white text-transparent bg-transparent selection:bg-[#264f78]/60 z-[1]"
-                    style={{
-                        fontFamily: FONT_FAMILY,
-                        fontSize: FONT_SIZE,
-                        lineHeight: `${LINE_HEIGHT}px`,
-                        padding: `12px 12px 12px ${GUTTER_WIDTH}px`,
-                        whiteSpace: 'pre',
-                        overflowWrap: 'normal',
-                        wordBreak: 'normal',
-                        tabSize: 2,
-                        color: 'transparent',
-                    }}
-                />
-            </div>
-        </div>
+        <div
+            ref={hostRef}
+            className="flex-1 min-h-0 min-w-0 overflow-hidden bg-editor-bg"
+        />
     );
-}
+});

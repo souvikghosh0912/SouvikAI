@@ -1,64 +1,89 @@
 'use client';
 
-import { GitBranch, Check, Loader2 } from 'lucide-react';
-import { useMemo } from 'react';
+import { GitBranch, Check, Loader2, Settings as SettingsIcon } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { languageLabel } from '@/lib/editor/language';
+import { useEditorSettings } from './EditorSettingsProvider';
 
 interface StatusBarProps {
     activePath: string | null;
     line: number;
     col: number;
     isSaving: boolean;
+    onOpenSettings?: () => void;
 }
 
-const EXT_TO_LANG: Record<string, string> = {
-    ts: 'TypeScript', tsx: 'TypeScript React', js: 'JavaScript', jsx: 'JavaScript React',
-    py: 'Python', rs: 'Rust', go: 'Go', html: 'HTML', css: 'CSS', scss: 'SCSS',
-    json: 'JSON', md: 'Markdown', sql: 'SQL', sh: 'Shell', yaml: 'YAML', yml: 'YAML',
-    java: 'Java', xml: 'XML', graphql: 'GraphQL',
-};
+export function StatusBar({ activePath, line, col, isSaving, onOpenSettings }: StatusBarProps) {
+    const displayLang = useMemo(() => languageLabel(activePath), [activePath]);
+    const { settings } = useEditorSettings();
 
-export function StatusBar({ activePath, line, col, isSaving }: StatusBarProps) {
-    const displayLang = useMemo(() => {
-        if (!activePath) return 'Plaintext';
-        const ext = activePath.split('.').pop()?.toLowerCase() ?? '';
-        return EXT_TO_LANG[ext] ?? 'Plaintext';
-    }, [activePath]);
+    // Debounced live region for cursor position so screen readers don't
+    // get spammed on every keystroke / arrow press.
+    const [announced, setAnnounced] = useState('');
+    const timer = useRef<number | null>(null);
+    useEffect(() => {
+        if (!activePath) return;
+        if (timer.current) window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => {
+            setAnnounced(`Line ${line}, column ${col}`);
+        }, 600);
+        return () => {
+            if (timer.current) window.clearTimeout(timer.current);
+        };
+    }, [line, col, activePath]);
 
     return (
-        <div className="flex items-center justify-between px-3 h-[22px] bg-[#0078d4] text-white text-[11px] shrink-0 select-none">
-            {/* Left section */}
+        <div
+            id="editor-status-bar"
+            role="status"
+            className="flex items-center justify-between px-3 h-[22px] bg-editor-status text-editor-status-foreground text-[11px] shrink-0 select-none"
+        >
             <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1 opacity-90">
-                    <GitBranch className="w-3 h-3" />
-                    main
+                    <GitBranch aria-hidden="true" className="w-3 h-3" />
+                    <span>main</span>
                 </span>
 
-                {isSaving && (
-                    <span className="flex items-center gap-1 text-white/80">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Saving…
+                {isSaving ? (
+                    <span className="flex items-center gap-1 text-editor-status-foreground/85">
+                        <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
+                        <span>Saving…</span>
                     </span>
-                )}
-                {!isSaving && activePath && (
-                    <span className="flex items-center gap-1 text-white/80">
-                        <Check className="w-3 h-3" />
-                        Saved
+                ) : activePath ? (
+                    <span className="flex items-center gap-1 text-editor-status-foreground/85">
+                        <Check aria-hidden="true" className="w-3 h-3" />
+                        <span>Saved</span>
                     </span>
-                )}
+                ) : null}
             </div>
 
-            {/* Right section */}
             <div className="flex items-center gap-4 opacity-90">
                 {activePath && (
                     <>
-                        <span>Ln {line}, Col {col}</span>
-                        <span>Spaces: 2</span>
+                        <span aria-hidden="true">Ln {line}, Col {col}</span>
+                        <span>{settings.insertSpaces ? 'Spaces' : 'Tab'}: {settings.tabSize}</span>
                         <span>UTF-8</span>
                         <span>LF</span>
                         <span className="font-medium">{displayLang}</span>
                     </>
                 )}
+
+                {onOpenSettings && (
+                    <button
+                        type="button"
+                        onClick={onOpenSettings}
+                        aria-label="Editor settings"
+                        className="flex items-center justify-center w-5 h-5 rounded hover:bg-editor-status-foreground/15 -mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-editor-status-foreground"
+                    >
+                        <SettingsIcon aria-hidden="true" className="w-3 h-3" />
+                    </button>
+                )}
             </div>
+
+            {/* Polite live region for screen-reader cursor announcements. */}
+            <span className="sr-only" aria-live="polite" aria-atomic="true">
+                {announced}
+            </span>
         </div>
     );
 }
