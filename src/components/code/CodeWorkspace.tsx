@@ -3,14 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-    ArrowLeft,
+    ChevronsLeft,
     File as FileIcon,
     RefreshCw,
-    Sparkles,
     Search,
     Settings as SettingsIcon,
     Code2,
     Eye,
+    Database,
+    ChevronDown,
+    SquareTerminal,
+    MoreHorizontal,
+    Copy,
+    Columns2,
     GitCompare,
     Map as MapIcon,
     PanelLeft,
@@ -36,6 +41,7 @@ import { EditorSettingsDialog } from '../editor/EditorSettingsDialog';
 import { CodePreview } from './CodePreview';
 import { DiffPanel } from './DiffPanel';
 import { FileTree } from './FileTree';
+import { ExplorerHeader } from './ExplorerHeader';
 import { ViewToggle, type WorkspaceView } from './ViewToggle';
 import { useHotkeys } from '@/lib/hotkeys';
 import type { BuilderFiles, BuilderMessage } from '@/types/code';
@@ -94,6 +100,7 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
     const [paletteOpen, setPaletteOpen] = useState(false);
     const [paletteMode, setPaletteMode] = useState<'command' | 'files'>('command');
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [collapseSignal, setCollapseSignal] = useState(0);
 
     const editorRef = useRef<CodeEditorHandle>(null);
     const editorHostRef = useRef<HTMLDivElement>(null);
@@ -553,76 +560,102 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
 
             <header
                 role="banner"
-                className="shrink-0 flex items-center gap-2 h-10 px-3 border-b border-border-subtle bg-background"
+                className="shrink-0 flex items-center h-10 px-1 bg-editor-bg-2 border-b border-editor-border"
             >
                 <SimpleTooltip content="Back" side="bottom">
                     <Button
                         asChild
                         variant="ghost"
                         size="icon-sm"
-                        className="h-7 w-7 text-foreground-muted hover:text-foreground"
+                        className="h-8 w-8 rounded-none text-editor-fg-subtle hover:text-editor-fg hover:bg-editor-bg-3"
                     >
                         <Link href="/code" aria-label="Back to Code home">
-                            <ArrowLeft className="h-4 w-4" />
+                            <ChevronsLeft className="h-4 w-4" />
                         </Link>
                     </Button>
                 </SimpleTooltip>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                    <div className="h-5 w-5 rounded-md bg-foreground text-background flex items-center justify-center">
-                        <Sparkles className="h-3 w-3" />
-                    </div>
-                    <span className="text-[13px] font-semibold text-foreground hidden sm:inline">
-                        Code
-                    </span>
-                </div>
+                <span className="h-5 w-px bg-editor-border-strong mx-1" aria-hidden />
 
-                <span className="h-4 w-px bg-border-subtle mx-1 shrink-0" aria-hidden />
+                <HeaderIcon
+                    label="Preview"
+                    icon={<Eye className="h-4 w-4" />}
+                    active={view === 'preview'}
+                    onClick={() => setView('preview')}
+                />
+                <HeaderIcon
+                    label="Editor"
+                    icon={<Code2 className="h-4 w-4" />}
+                    active={view === 'editor'}
+                    onClick={() => setView('editor')}
+                />
+                <HeaderIcon
+                    label="Data"
+                    icon={<Database className="h-4 w-4" />}
+                    active={false}
+                />
 
-                <h1 className="text-[13px] font-medium text-foreground truncate min-w-0">
+                <h1 className="ml-3 text-[12px] font-medium text-editor-fg-muted truncate min-w-0 hidden md:block">
                     {props.title}
                 </h1>
 
                 <div className="flex-1" />
 
-                <SimpleTooltip content="Command palette (⌘⇧P)" side="bottom">
-                    <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => openPalette('command')}
-                        aria-label="Open command palette"
-                        className="hidden md:inline-flex h-7 w-7 text-foreground-muted hover:text-foreground"
+                {pendingReviewCount > 0 && (
+                    <button
+                        type="button"
+                        onClick={handleOpenReview}
+                        className="inline-flex items-center gap-1.5 h-7 px-2 mr-1 text-[12px] font-medium text-amber-400 hover:text-amber-300 transition-colors"
                     >
-                        <Search className="h-3.5 w-3.5" />
-                    </Button>
-                </SimpleTooltip>
-                <SimpleTooltip content="Editor settings (⌘,)" side="bottom">
-                    <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => setSettingsOpen(true)}
-                        aria-label="Open editor settings"
-                        className="hidden md:inline-flex h-7 w-7 text-foreground-muted hover:text-foreground"
+                        <GitCompare className="h-3.5 w-3.5" />
+                        Review
+                        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500/20 px-1 text-[10px] font-semibold">
+                            {pendingReviewCount}
+                        </span>
+                    </button>
+                )}
+
+                <SimpleTooltip content="Latest version" side="bottom">
+                    <button
+                        type="button"
+                        className="hidden md:inline-flex items-center gap-1 h-8 px-2 text-[13px] text-editor-fg-muted hover:text-editor-fg hover:bg-editor-bg-3 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-editor-accent"
                     >
-                        <SettingsIcon className="h-3.5 w-3.5" />
-                    </Button>
+                        Latest
+                        <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                    </button>
                 </SimpleTooltip>
+
+                <HeaderIcon
+                    label="Toggle Terminal"
+                    icon={<SquareTerminal className="h-4 w-4" />}
+                />
+                <HeaderIcon
+                    label="Command palette (⌘⇧P)"
+                    icon={<Search className="h-4 w-4" />}
+                    onClick={() => openPalette('command')}
+                />
+                <HeaderIcon
+                    label="Editor settings (⌘,)"
+                    icon={<SettingsIcon className="h-4 w-4" />}
+                    onClick={() => setSettingsOpen(true)}
+                />
+                <HeaderIcon label="More" icon={<MoreHorizontal className="h-4 w-4" />} />
 
                 {/* Mobile-only segmented switch */}
                 <div
                     role="tablist"
                     aria-label="Workspace pane"
-                    className="md:hidden inline-flex items-center rounded-lg bg-surface-2 p-0.5 border border-border-subtle"
+                    className="md:hidden ml-1 inline-flex items-center bg-editor-bg-3 border border-editor-border-strong"
                 >
                     <button
                         role="tab"
                         aria-selected={mobileTab === 'chat'}
                         onClick={() => setMobileTab('chat')}
                         className={cn(
-                            'h-7 px-2.5 rounded-md text-[12px] font-medium',
+                            'h-7 px-2.5 text-[12px] font-medium transition-colors',
                             mobileTab === 'chat'
-                                ? 'bg-background text-foreground shadow-sm'
-                                : 'text-foreground-muted',
+                                ? 'bg-editor-bg text-editor-fg'
+                                : 'text-editor-fg-subtle hover:text-editor-fg',
                         )}
                     >
                         Chat
@@ -632,10 +665,10 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                         aria-selected={mobileTab === 'right'}
                         onClick={() => setMobileTab('right')}
                         className={cn(
-                            'h-7 px-2.5 rounded-md text-[12px] font-medium',
+                            'h-7 px-2.5 text-[12px] font-medium transition-colors',
                             mobileTab === 'right'
-                                ? 'bg-background text-foreground shadow-sm'
-                                : 'text-foreground-muted',
+                                ? 'bg-editor-bg text-editor-fg'
+                                : 'text-editor-fg-subtle hover:text-editor-fg',
                         )}
                     >
                         Code
@@ -699,45 +732,16 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                         'md:flex',
                     )}
                 >
-                    <div className="shrink-0 flex items-center gap-2 h-10 px-3 border-b border-border-subtle bg-background">
+                    {/* Mobile-only secondary toolbar — desktop uses the
+                        new VS Code-style chrome with the ViewToggle living
+                        in the top header. */}
+                    <div className="md:hidden shrink-0 flex items-center gap-2 h-9 px-2 border-b border-editor-border bg-editor-bg-2">
                         <ViewToggle
                             value={view}
                             onChange={setView}
                             reviewCount={pendingReviewCount}
                         />
-
-                        <div className="hidden md:flex flex-1 min-w-0 items-center gap-1.5 text-foreground-muted">
-                            {view === 'editor' && props.activeFile && (
-                                <>
-                                    <FileIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                    <code className="font-mono text-[12px] truncate">
-                                        {props.activeFile}
-                                    </code>
-                                </>
-                            )}
-                            {view === 'preview' && (
-                                <span className="text-[12px]">Live preview</span>
-                            )}
-                            {view === 'review' && (
-                                <span className="text-[12px]">Review pending changes</span>
-                            )}
-                        </div>
-
-                        <div className="ml-auto md:ml-0 flex items-center gap-2 shrink-0">
-                            {view === 'editor' && (
-                                <SimpleTooltip content="Toggle file tree (⌘B)" side="bottom">
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        onClick={() => setShowFileTree((v) => !v)}
-                                        aria-label="Toggle file tree"
-                                        aria-pressed={showFileTree}
-                                        className="h-7 w-7 text-foreground-muted hover:text-foreground"
-                                    >
-                                        <PanelLeft className="h-3.5 w-3.5" />
-                                    </Button>
-                                </SimpleTooltip>
-                            )}
+                        <div className="ml-auto flex items-center gap-2 shrink-0">
                             {view === 'preview' && (
                                 <SimpleTooltip content="Reload preview" side="bottom">
                                     <Button
@@ -745,13 +749,13 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                                         size="icon-sm"
                                         onClick={() => setReloadKey((k) => k + 1)}
                                         aria-label="Reload preview"
-                                        className="h-7 w-7 text-foreground-muted hover:text-foreground"
+                                        className="h-7 w-7 rounded-none text-editor-fg-muted hover:text-editor-fg"
                                     >
                                         <RefreshCw className="h-3.5 w-3.5" />
                                     </Button>
                                 </SimpleTooltip>
                             )}
-                            <span className="text-[11px] text-foreground-subtle tabular-nums">
+                            <span className="text-[11px] text-editor-fg-subtle tabular-nums">
                                 {view === 'review'
                                     ? `${pendingReviewCount} pending`
                                     : `${fileCount} ${fileCount === 1 ? 'file' : 'files'}`}
@@ -765,13 +769,22 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                                 <nav
                                     id="editor-files"
                                     aria-label="Project files"
-                                    className="w-[220px] shrink-0 border-r border-editor-border bg-editor-bg-2 overflow-y-auto"
+                                    className="w-[260px] shrink-0 flex flex-col bg-editor-bg-2 overflow-hidden"
                                 >
-                                    <FileTree
-                                        files={props.files}
-                                        activeFile={props.activeFile}
-                                        onSelectFile={props.onSelectFile}
+                                    <ExplorerHeader
+                                        title={props.title}
+                                        onCollapseAll={() =>
+                                            setCollapseSignal((n) => n + 1)
+                                        }
                                     />
+                                    <div className="flex-1 min-h-0 overflow-y-auto">
+                                        <FileTree
+                                            files={props.files}
+                                            activeFile={props.activeFile}
+                                            onSelectFile={props.onSelectFile}
+                                            collapseSignal={collapseSignal}
+                                        />
+                                    </div>
                                 </nav>
                             )}
                             <div
