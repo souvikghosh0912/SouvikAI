@@ -7,19 +7,37 @@ import {
     File as FileIcon,
     RefreshCw,
     Sparkles,
+    Search,
+    Settings as SettingsIcon,
+    Code2,
+    Eye,
+    GitCompare,
+    Map as MapIcon,
+    PanelLeft,
+    Replace,
+    SplitSquareHorizontal,
+    Type,
+    Accessibility,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button, SimpleTooltip } from '@/components/ui';
 import { BuilderChatPanel } from './BuilderChatPanel';
-import { CodeEditor } from '../editor/CodeEditor';
+import { CodeEditor, type CodeEditorHandle } from '../editor/CodeEditor';
 import { EditorTabs } from '../editor/EditorTabs';
 import { Breadcrumb } from '../editor/Breadcrumb';
 import { Minimap } from '../editor/Minimap';
 import { StatusBar } from '../editor/StatusBar';
+import {
+    EditorSettingsProvider,
+    useEditorSettings,
+} from '../editor/EditorSettingsProvider';
+import { CommandPalette, type Command } from '../editor/CommandPalette';
+import { EditorSettingsDialog } from '../editor/EditorSettingsDialog';
 import { CodePreview } from './CodePreview';
 import { DiffPanel } from './DiffPanel';
 import { FileTree } from './FileTree';
 import { ViewToggle, type WorkspaceView } from './ViewToggle';
+import { useHotkeys } from '@/lib/hotkeys';
 import type { BuilderFiles, BuilderMessage } from '@/types/code';
 import type { AIModel } from '@/types/chat';
 
@@ -47,7 +65,6 @@ const CHAT_WIDTH_MIN = 260;
 const CHAT_WIDTH_MAX_FALLBACK = 720;
 
 function clampWidth(width: number, viewport: number): number {
-    // Always leave at least 360px for the right pane on desktop.
     const upper = Math.max(
         CHAT_WIDTH_MIN,
         Math.min(CHAT_WIDTH_MAX_FALLBACK, viewport - 360),
@@ -55,93 +72,84 @@ function clampWidth(width: number, viewport: number): number {
     return Math.max(CHAT_WIDTH_MIN, Math.min(upper, width));
 }
 
-/**
- * Two-column Builder layout:
- *
- *   [ chat panel  ] | [ editor ⇄ preview ]
- *      resizable        flex-1
- *
- * The right pane swaps between the file editor, the live preview, and the
- * pending-changes review surface via {@link ViewToggle}. A single unified
- * toolbar (h-10) at the top of the right pane hosts the toggle plus the
- * view-specific context (file path / preview status / pending count) and
- * the view-specific action (preview reload). Eliminating the per-view
- * sub-toolbars buys a row of vertical real estate and keeps all chrome on
- * a single horizontal rhythm with the workspace header.
- *
- * On desktop the divider between the two panes can be dragged to resize
- * them; the chosen width is persisted in localStorage. On mobile the
- * layout collapses to a single column with a tab bar at the top to switch
- * between chat / right-pane, and the resize handle is hidden.
- */
+/** Outer wrapper that mounts the EditorSettingsProvider before the inner
+ * workspace, so any descendant (including the editor itself) can read
+ * settings via {@link useEditorSettings}. */
 export function CodeWorkspace(props: CodeWorkspaceProps) {
+    return (
+        <EditorSettingsProvider>
+            <CodeWorkspaceInner {...props} />
+        </EditorSettingsProvider>
+    );
+}
+
+function CodeWorkspaceInner(props: CodeWorkspaceProps) {
     const [view, setView] = useState<WorkspaceView>('editor');
     const [mobileTab, setMobileTab] = useState<'chat' | 'right'>('chat');
     const [reloadKey, setReloadKey] = useState(0);
 
-    // Advanced editor state
     const [openTabs, setOpenTabs] = useState<string[]>([]);
-    const [showMinimap, setShowMinimap] = useState(true);
+    const [showFileTree, setShowFileTree] = useState(true);
     const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-    const scrollRef = useRef<HTMLDivElement>(null);
+    const [paletteOpen, setPaletteOpen] = useState(false);
+    const [paletteMode, setPaletteMode] = useState<'command' | 'files'>('command');
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
-    // Keep tabs in sync with active file
+    const editorRef = useRef<CodeEditorHandle>(null);
+    const editorHostRef = useRef<HTMLDivElement>(null);
+
+    const { settings, update } = useEditorSettings();
+
+    // ── Tab management ────────────────────────────────────────────────────
     useEffect(() => {
         if (props.activeFile && !openTabs.includes(props.activeFile)) {
-            setOpenTabs(prev => [...prev, props.activeFile!]);
+            setOpenTabs((prev) => [...prev, props.activeFile!]);
         }
     }, [props.activeFile, openTabs]);
 
-    // Total pending changes across all assistant messages — drives the
-    // "Review" tab badge.
+    const closeTab = useCallback(
+        (path: string) => {
+            setOpenTabs((prev) => {
+                const next = prev.filter((p) => p !== path);
+                if (props.activeFile === path) {
+                    const fallback = next[next.length - 1] ?? null;
+                    props.onSelectFile(fallback);
+                }
+                return next;
+            });
+        },
+        [props],
+    );
+
     const pendingReviewCount = useMemo(() => {
         let n = 0;
-        for (const m of props.messages) {
-            n += m.review?.pending.length ?? 0;
-        }
+        for (const m of props.messages) n += m.review?.pending.length ?? 0;
         return n;
     }, [props.messages]);
 
-    // If the Review tab is open and the queue empties, fall back to
-    // the editor so the user isn't stranded on an empty surface.
     useEffect(() => {
-        if (view === 'review' && pendingReviewCount === 0) {
-            setView('editor');
-        }
+        if (view === 'review' && pendingReviewCount === 0) setView('editor');
     }, [view, pendingReviewCount]);
 
-    /**
-     * Called by the chat panel when the user clicks "Review" on an
-     * assistant message banner. Switches the right pane to the diff
-     * view (and on mobile flips to the right tab so it's visible).
-     */
     const handleOpenReview = useCallback(() => {
         setView('review');
         setMobileTab('right');
     }, []);
 
-
-
-    // ── Resizable left pane ────────────────────────────────────────────────
+    // ── Resizable chat pane (unchanged behavior) ──────────────────────────
     const [isDesktop, setIsDesktop] = useState(false);
     const [chatWidth, setChatWidth] = useState<number>(CHAT_WIDTH_DEFAULT);
     const [isDragging, setIsDragging] = useState(false);
-
-    const dragRef = useRef<{
-        startX: number;
-        startWidth: number;
-        active: boolean;
-    }>({ startX: 0, startWidth: CHAT_WIDTH_DEFAULT, active: false });
-
-    // Mirror chatWidth into a ref so the global drag listeners can read the
-    // latest value without re-binding on every change.
+    const dragRef = useRef<{ startX: number; startWidth: number; active: boolean }>({
+        startX: 0,
+        startWidth: CHAT_WIDTH_DEFAULT,
+        active: false,
+    });
     const chatWidthRef = useRef(chatWidth);
     useEffect(() => {
         chatWidthRef.current = chatWidth;
     }, [chatWidth]);
 
-    // Track desktop breakpoint (md+) so we only apply inline width / show the
-    // handle on desktop.
     useEffect(() => {
         if (typeof window === 'undefined') return;
         const mq = window.matchMedia('(min-width: 768px)');
@@ -151,7 +159,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         return () => mq.removeEventListener('change', update);
     }, []);
 
-    // Hydrate persisted width and reclamp on viewport resize.
     useEffect(() => {
         if (typeof window === 'undefined') return;
         let initial = CHAT_WIDTH_DEFAULT;
@@ -160,38 +167,28 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
             const parsed = stored ? Number.parseInt(stored, 10) : NaN;
             if (Number.isFinite(parsed)) initial = parsed;
         } catch {
-            /* ignore — localStorage may be unavailable */
+            /* ignore */
         }
         setChatWidth((prev) => clampWidth(initial || prev, window.innerWidth));
-
-        const onResize = () => {
-            setChatWidth((prev) => clampWidth(prev, window.innerWidth));
-        };
+        const onResize = () => setChatWidth((prev) => clampWidth(prev, window.innerWidth));
         window.addEventListener('resize', onResize);
         return () => window.removeEventListener('resize', onResize);
     }, []);
 
-    // Global mouse / touch listeners for the drag.
     useEffect(() => {
         if (typeof window === 'undefined') return;
-
         const onMove = (clientX: number) => {
             const drag = dragRef.current;
             if (!drag.active) return;
             const delta = clientX - drag.startX;
-            setChatWidth(
-                clampWidth(drag.startWidth + delta, window.innerWidth),
-            );
+            setChatWidth(clampWidth(drag.startWidth + delta, window.innerWidth));
         };
-
         const onMouseMove = (e: MouseEvent) => onMove(e.clientX);
         const onTouchMove = (e: TouchEvent) => {
             if (e.touches.length === 0) return;
             onMove(e.touches[0].clientX);
-            // Prevent the page from scrolling while dragging on touch devices.
             if (dragRef.current.active && e.cancelable) e.preventDefault();
         };
-
         const stop = () => {
             const drag = dragRef.current;
             if (!drag.active) return;
@@ -199,7 +196,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
             setIsDragging(false);
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
-            // Persist the latest width.
             try {
                 window.localStorage.setItem(
                     CHAT_WIDTH_STORAGE_KEY,
@@ -209,7 +205,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                 /* ignore */
             }
         };
-
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('mouseup', stop);
         window.addEventListener('touchmove', onTouchMove, { passive: false });
@@ -224,23 +219,19 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         };
     }, []);
 
-    const beginDrag = useCallback(
-        (clientX: number) => {
-            dragRef.current = {
-                startX: clientX,
-                startWidth: chatWidthRef.current,
-                active: true,
-            };
-            setIsDragging(true);
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-        },
-        [],
-    );
+    const beginDrag = useCallback((clientX: number) => {
+        dragRef.current = {
+            startX: clientX,
+            startWidth: chatWidthRef.current,
+            active: true,
+        };
+        setIsDragging(true);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    }, []);
 
     const onHandleMouseDown = useCallback(
         (e: React.MouseEvent) => {
-            // Left mouse button only.
             if (e.button !== 0) return;
             e.preventDefault();
             beginDrag(e.clientX);
@@ -267,38 +258,303 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         }
     }, []);
 
-    const onHandleKeyDown = useCallback(
-        (e: React.KeyboardEvent) => {
-            if (typeof window === 'undefined') return;
-            const step = e.shiftKey ? 32 : 16;
-            if (e.key === 'ArrowLeft') {
-                e.preventDefault();
-                setChatWidth((w) => clampWidth(w - step, window.innerWidth));
-            } else if (e.key === 'ArrowRight') {
-                e.preventDefault();
-                setChatWidth((w) => clampWidth(w + step, window.innerWidth));
-            } else if (e.key === 'Home') {
-                e.preventDefault();
-                setChatWidth(CHAT_WIDTH_MIN);
-            } else if (e.key === 'End') {
-                e.preventDefault();
-                setChatWidth(
-                    clampWidth(CHAT_WIDTH_MAX_FALLBACK, window.innerWidth),
-                );
-            }
-        },
-        [],
-    );
+    const onHandleKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (typeof window === 'undefined') return;
+        const step = e.shiftKey ? 32 : 16;
+        if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            setChatWidth((w) => clampWidth(w - step, window.innerWidth));
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            setChatWidth((w) => clampWidth(w + step, window.innerWidth));
+        } else if (e.key === 'Home') {
+            e.preventDefault();
+            setChatWidth(CHAT_WIDTH_MIN);
+        } else if (e.key === 'End') {
+            e.preventDefault();
+            setChatWidth(clampWidth(CHAT_WIDTH_MAX_FALLBACK, window.innerWidth));
+        }
+    }, []);
 
     const activeContent =
         props.activeFile != null ? props.files[props.activeFile] ?? '' : '';
-
     const fileCount = Object.keys(props.files).length;
+    const fileList = useMemo(() => Object.keys(props.files).sort(), [props.files]);
+
+    // ── Commands & hotkeys ────────────────────────────────────────────────
+    const openPalette = useCallback((mode: 'command' | 'files' = 'command') => {
+        setPaletteMode(mode);
+        setPaletteOpen(true);
+    }, []);
+
+    const commands = useMemo<Command[]>(() => {
+        const cmds: Command[] = [
+            {
+                id: 'view.editor',
+                title: 'Show Editor',
+                group: 'View',
+                icon: <Code2 className="h-3.5 w-3.5" />,
+                shortcut: 'mod+1',
+                run: () => setView('editor'),
+            },
+            {
+                id: 'view.preview',
+                title: 'Show Preview',
+                group: 'View',
+                icon: <Eye className="h-3.5 w-3.5" />,
+                shortcut: 'mod+2',
+                run: () => setView('preview'),
+            },
+            {
+                id: 'view.review',
+                title: 'Show Review',
+                group: 'View',
+                icon: <GitCompare className="h-3.5 w-3.5" />,
+                shortcut: 'mod+3',
+                hidden: pendingReviewCount === 0,
+                run: () => setView('review'),
+            },
+            {
+                id: 'view.toggleFileTree',
+                title: showFileTree ? 'Hide File Tree' : 'Show File Tree',
+                group: 'View',
+                icon: <PanelLeft className="h-3.5 w-3.5" />,
+                shortcut: 'mod+b',
+                run: () => setShowFileTree((v) => !v),
+            },
+            {
+                id: 'view.toggleMinimap',
+                title: settings.minimap ? 'Hide Minimap' : 'Show Minimap',
+                group: 'View',
+                icon: <MapIcon className="h-3.5 w-3.5" />,
+                shortcut: 'mod+\\',
+                run: () => update('minimap', !settings.minimap),
+            },
+            {
+                id: 'view.preview.reload',
+                title: 'Reload Preview',
+                group: 'View',
+                icon: <RefreshCw className="h-3.5 w-3.5" />,
+                shortcut: 'mod+r',
+                hidden: view !== 'preview',
+                run: () => setReloadKey((k) => k + 1),
+            },
+            {
+                id: 'editor.find',
+                title: 'Find in File',
+                group: 'Edit',
+                icon: <Search className="h-3.5 w-3.5" />,
+                shortcut: 'mod+f',
+                keywords: ['search'],
+                run: () => editorRef.current?.runCommand('search'),
+            },
+            {
+                id: 'editor.replace',
+                title: 'Find and Replace',
+                group: 'Edit',
+                icon: <Replace className="h-3.5 w-3.5" />,
+                shortcut: 'mod+h',
+                run: () => editorRef.current?.runCommand('replace'),
+            },
+            {
+                id: 'editor.gotoLine',
+                title: 'Go to Line',
+                group: 'Go',
+                icon: <SplitSquareHorizontal className="h-3.5 w-3.5" />,
+                shortcut: 'mod+g',
+                run: () => editorRef.current?.runCommand('gotoLine'),
+            },
+            {
+                id: 'editor.foldAll',
+                title: 'Fold All',
+                group: 'Edit',
+                run: () => editorRef.current?.runCommand('foldAll'),
+            },
+            {
+                id: 'editor.unfoldAll',
+                title: 'Unfold All',
+                group: 'Edit',
+                run: () => editorRef.current?.runCommand('unfoldAll'),
+            },
+            {
+                id: 'files.quickOpen',
+                title: 'Go to File…',
+                group: 'Go',
+                shortcut: 'mod+p',
+                icon: <FileIcon className="h-3.5 w-3.5" />,
+                run: () => openPalette('files'),
+            },
+            {
+                id: 'files.closeTab',
+                title: 'Close Tab',
+                group: 'Files',
+                shortcut: 'mod+w',
+                run: () => {
+                    if (props.activeFile) closeTab(props.activeFile);
+                },
+            },
+            {
+                id: 'editor.settings',
+                title: 'Open Settings',
+                group: 'Editor',
+                shortcut: 'mod+,',
+                icon: <SettingsIcon className="h-3.5 w-3.5" />,
+                run: () => setSettingsOpen(true),
+            },
+            {
+                id: 'editor.theme.auto',
+                title: 'Theme: Auto (match app)',
+                group: 'Theme',
+                run: () => update('theme', 'auto'),
+            },
+            {
+                id: 'editor.theme.hc',
+                title: 'Theme: High Contrast',
+                group: 'Theme',
+                icon: <Accessibility className="h-3.5 w-3.5" />,
+                run: () => update('theme', 'hc'),
+            },
+            {
+                id: 'editor.fontSize.up',
+                title: 'Increase Font Size',
+                group: 'View',
+                icon: <Type className="h-3.5 w-3.5" />,
+                run: () => update('fontSize', Math.min(24, settings.fontSize + 1)),
+            },
+            {
+                id: 'editor.fontSize.down',
+                title: 'Decrease Font Size',
+                group: 'View',
+                run: () => update('fontSize', Math.max(10, settings.fontSize - 1)),
+            },
+            {
+                id: 'editor.wordWrap',
+                title: settings.wordWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
+                group: 'View',
+                shortcut: 'alt+z',
+                run: () => update('wordWrap', !settings.wordWrap),
+            },
+        ];
+        return cmds;
+    }, [
+        view,
+        showFileTree,
+        settings,
+        pendingReviewCount,
+        update,
+        closeTab,
+        props.activeFile,
+        openPalette,
+    ]);
+
+    // Workspace-level hotkeys.
+    useHotkeys([
+        {
+            keys: ['mod+shift+p', 'f1'],
+            handler: () => openPalette('command'),
+            allowInInput: true,
+            description: 'Command palette',
+        },
+        {
+            keys: 'mod+p',
+            handler: () => openPalette('files'),
+            allowInInput: true,
+            description: 'Quick open file',
+        },
+        {
+            keys: 'mod+,',
+            handler: () => setSettingsOpen(true),
+            allowInInput: true,
+            description: 'Open editor settings',
+        },
+        {
+            keys: 'mod+b',
+            handler: () => setShowFileTree((v) => !v),
+            description: 'Toggle file tree',
+        },
+        {
+            keys: 'mod+1',
+            handler: () => setView('editor'),
+            allowInInput: true,
+            description: 'Show editor',
+        },
+        {
+            keys: 'mod+2',
+            handler: () => setView('preview'),
+            allowInInput: true,
+            description: 'Show preview',
+        },
+        {
+            keys: 'mod+3',
+            handler: () => {
+                if (pendingReviewCount > 0) setView('review');
+            },
+            allowInInput: true,
+            description: 'Show review',
+        },
+        {
+            keys: 'mod+w',
+            handler: () => {
+                if (props.activeFile) closeTab(props.activeFile);
+            },
+            description: 'Close tab',
+        },
+        {
+            keys: 'mod+\\',
+            handler: () => update('minimap', !settings.minimap),
+            description: 'Toggle minimap',
+        },
+        {
+            keys: 'mod+s',
+            // Auto-save runs on edit; intercept to suppress browser
+            // "Save Page" while inside the editor.
+            handler: () => {},
+            allowInInput: true,
+            description: 'Save (auto)',
+        },
+        {
+            keys: 'alt+z',
+            handler: () => update('wordWrap', !settings.wordWrap),
+            allowInInput: true,
+            description: 'Toggle word wrap',
+        },
+    ]);
+
+    // The data-editor-theme attr only applies the high-contrast scope.
+    // "auto" is a no-op — the editor follows the app theme via .dark.
+    const editorThemeAttr = settings.theme === 'hc' ? 'hc' : undefined;
 
     return (
-        <div className="flex flex-col h-screen w-full bg-background overflow-hidden">
-            {/* Top header — single source of truth for brand + project title. */}
-            <header className="shrink-0 flex items-center gap-2 h-10 px-3 border-b border-border-subtle bg-background">
+        <div
+            className="flex flex-col h-screen w-full bg-background overflow-hidden"
+            data-editor-theme={editorThemeAttr}
+        >
+            {/* Skip links — visible only on focus, give keyboard users
+                the same "jump to landmark" affordance VoiceOver gets via
+                the rotor. */}
+            <a
+                href="#editor-files"
+                className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-[100] focus:px-2 focus:py-1 focus:rounded focus:bg-foreground focus:text-background focus:text-[12px]"
+            >
+                Skip to file tree
+            </a>
+            <a
+                href="#editor-content"
+                className="sr-only focus:not-sr-only focus:absolute focus:left-32 focus:top-2 focus:z-[100] focus:px-2 focus:py-1 focus:rounded focus:bg-foreground focus:text-background focus:text-[12px]"
+            >
+                Skip to editor
+            </a>
+            <a
+                href="#chat-panel"
+                className="sr-only focus:not-sr-only focus:absolute focus:left-60 focus:top-2 focus:z-[100] focus:px-2 focus:py-1 focus:rounded focus:bg-foreground focus:text-background focus:text-[12px]"
+            >
+                Skip to chat
+            </a>
+
+            <header
+                role="banner"
+                className="shrink-0 flex items-center gap-2 h-10 px-3 border-b border-border-subtle bg-background"
+            >
                 <SimpleTooltip content="Back" side="bottom">
                     <Button
                         asChild
@@ -323,15 +579,44 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
 
                 <span className="h-4 w-px bg-border-subtle mx-1 shrink-0" aria-hidden />
 
-                <div className="text-[13px] font-medium text-foreground truncate min-w-0">
+                <h1 className="text-[13px] font-medium text-foreground truncate min-w-0">
                     {props.title}
-                </div>
+                </h1>
 
                 <div className="flex-1" />
 
+                <SimpleTooltip content="Command palette (⌘⇧P)" side="bottom">
+                    <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => openPalette('command')}
+                        aria-label="Open command palette"
+                        className="hidden md:inline-flex h-7 w-7 text-foreground-muted hover:text-foreground"
+                    >
+                        <Search className="h-3.5 w-3.5" />
+                    </Button>
+                </SimpleTooltip>
+                <SimpleTooltip content="Editor settings (⌘,)" side="bottom">
+                    <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => setSettingsOpen(true)}
+                        aria-label="Open editor settings"
+                        className="hidden md:inline-flex h-7 w-7 text-foreground-muted hover:text-foreground"
+                    >
+                        <SettingsIcon className="h-3.5 w-3.5" />
+                    </Button>
+                </SimpleTooltip>
+
                 {/* Mobile-only segmented switch */}
-                <div className="md:hidden inline-flex items-center rounded-lg bg-surface-2 p-0.5 border border-border-subtle">
+                <div
+                    role="tablist"
+                    aria-label="Workspace pane"
+                    className="md:hidden inline-flex items-center rounded-lg bg-surface-2 p-0.5 border border-border-subtle"
+                >
                     <button
+                        role="tab"
+                        aria-selected={mobileTab === 'chat'}
                         onClick={() => setMobileTab('chat')}
                         className={cn(
                             'h-7 px-2.5 rounded-md text-[12px] font-medium',
@@ -343,6 +628,8 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                         Chat
                     </button>
                     <button
+                        role="tab"
+                        aria-selected={mobileTab === 'right'}
                         onClick={() => setMobileTab('right')}
                         className={cn(
                             'h-7 px-2.5 rounded-md text-[12px] font-medium',
@@ -357,16 +644,13 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
             </header>
 
             <div className="flex-1 min-h-0 flex">
-                {/* ── LEFT: chat panel ── */}
                 <aside
+                    id="chat-panel"
+                    aria-label="AI chat"
                     style={isDesktop ? { width: `${chatWidth}px` } : undefined}
                     className={cn(
                         'bg-background flex flex-col min-h-0',
-                        // On mobile, take the whole row when chat tab is active.
                         mobileTab === 'chat' ? 'flex' : 'hidden',
-                        // Desktop fallback width prior to hydration so there's
-                        // no layout flash, plus border on the right when the
-                        // resize handle is hidden.
                         'md:flex md:shrink-0 md:w-[360px] border-r border-border-subtle md:border-r-0',
                     )}
                 >
@@ -383,7 +667,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                     />
                 </aside>
 
-                {/* ── RESIZE HANDLE (desktop only) ── */}
                 <div
                     role="separator"
                     aria-orientation="vertical"
@@ -398,7 +681,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                     onKeyDown={onHandleKeyDown}
                     title="Drag to resize · double-click to reset"
                     className={cn(
-                        // Hidden on mobile; thin strip on desktop.
                         'hidden md:flex shrink-0 relative items-stretch',
                         'w-1 cursor-col-resize select-none group',
                         'bg-border-subtle hover:bg-foreground/30 transition-colors',
@@ -406,25 +688,17 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                         isDragging && 'bg-foreground/40',
                     )}
                 >
-                    {/* Wider invisible hit-area so the handle is easier to grab */}
-                    <span
-                        aria-hidden
-                        className="absolute inset-y-0 -left-1.5 -right-1.5"
-                    />
+                    <span aria-hidden className="absolute inset-y-0 -left-1.5 -right-1.5" />
                 </div>
 
-                {/* ── RIGHT: editor / preview ── */}
-                <section
+                <main
+                    aria-label="Editor"
                     className={cn(
                         'flex-1 min-w-0 flex flex-col bg-background',
                         mobileTab === 'right' ? 'flex' : 'hidden',
                         'md:flex',
                     )}
                 >
-                    {/* Single unified right-pane toolbar (h-10).
-                        Layout: [ViewToggle] · [contextual middle (truncates)] · [actions + counter]
-                        The middle slot adapts per view so we never need a
-                        second sub-toolbar inside the editor or preview. */}
                     <div className="shrink-0 flex items-center gap-2 h-10 px-3 border-b border-border-subtle bg-background">
                         <ViewToggle
                             value={view}
@@ -435,7 +709,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                         <div className="hidden md:flex flex-1 min-w-0 items-center gap-1.5 text-foreground-muted">
                             {view === 'editor' && props.activeFile && (
                                 <>
-                                    <FileIcon className="h-3.5 w-3.5 shrink-0" />
+                                    <FileIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                                     <code className="font-mono text-[12px] truncate">
                                         {props.activeFile}
                                     </code>
@@ -450,6 +724,20 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                         </div>
 
                         <div className="ml-auto md:ml-0 flex items-center gap-2 shrink-0">
+                            {view === 'editor' && (
+                                <SimpleTooltip content="Toggle file tree (⌘B)" side="bottom">
+                                    <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        onClick={() => setShowFileTree((v) => !v)}
+                                        aria-label="Toggle file tree"
+                                        aria-pressed={showFileTree}
+                                        className="h-7 w-7 text-foreground-muted hover:text-foreground"
+                                    >
+                                        <PanelLeft className="h-3.5 w-3.5" />
+                                    </Button>
+                                </SimpleTooltip>
+                            )}
                             {view === 'preview' && (
                                 <SimpleTooltip content="Reload preview" side="bottom">
                                     <Button
@@ -472,50 +760,62 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                     </div>
 
                     {view === 'editor' && (
-                        <div className="flex-1 min-h-0 flex">
-                            <div className="w-[200px] shrink-0 border-r border-[#3e3e42] bg-[#252526] overflow-y-auto">
-                                <FileTree
-                                    files={props.files}
-                                    activeFile={props.activeFile}
-                                    onSelectFile={props.onSelectFile}
-                                />
-                            </div>
-                            <div className="flex-1 min-w-0 flex flex-col bg-[#1e1e1e]">
+                        <div className="flex-1 min-h-0 flex bg-editor-bg">
+                            {showFileTree && (
+                                <nav
+                                    id="editor-files"
+                                    aria-label="Project files"
+                                    className="w-[220px] shrink-0 border-r border-editor-border bg-editor-bg-2 overflow-y-auto"
+                                >
+                                    <FileTree
+                                        files={props.files}
+                                        activeFile={props.activeFile}
+                                        onSelectFile={props.onSelectFile}
+                                    />
+                                </nav>
+                            )}
+                            <div
+                                id="editor-content"
+                                className="flex-1 min-w-0 flex flex-col bg-editor-bg"
+                            >
                                 <EditorTabs
                                     openTabs={openTabs}
                                     activePath={props.activeFile}
                                     onSelect={props.onSelectFile}
-                                    onClose={path => {
-                                        setOpenTabs(prev => prev.filter(p => p !== path));
-                                        if (props.activeFile === path) {
-                                            props.onSelectFile(openTabs.find(p => p !== path) ?? null);
-                                        }
-                                    }}
+                                    onClose={closeTab}
                                 />
                                 <Breadcrumb activePath={props.activeFile} />
                                 <div className="flex-1 min-h-0 flex relative">
                                     <CodeEditor
+                                        ref={editorRef}
                                         path={props.activeFile}
                                         value={activeContent}
+                                        hostRef={editorHostRef}
                                         onChange={(next) =>
-                                            props.activeFile && props.onUpdateFile(props.activeFile, next)
+                                            props.activeFile &&
+                                            props.onUpdateFile(props.activeFile, next)
                                         }
-                                        onPositionChange={(line, col) => setCursorPos({ line, col })}
-                                        scrollRef={scrollRef}
+                                        onPositionChange={(line, col) =>
+                                            setCursorPos({ line, col })
+                                        }
                                     />
-                                    <Minimap
-                                        path={props.activeFile}
-                                        content={activeContent}
-                                        scrollContainerRef={scrollRef}
-                                        isVisible={showMinimap}
-                                        onToggle={() => setShowMinimap(!showMinimap)}
-                                    />
+                                    {settings.minimap && props.activeFile && (
+                                        <Minimap
+                                            editorHostRef={editorHostRef}
+                                            content={activeContent}
+                                            isVisible={settings.minimap}
+                                            onToggle={() =>
+                                                update('minimap', !settings.minimap)
+                                            }
+                                        />
+                                    )}
                                 </div>
                                 <StatusBar
                                     activePath={props.activeFile}
                                     line={cursorPos.line}
                                     col={cursorPos.col}
                                     isSaving={false}
+                                    onOpenSettings={() => setSettingsOpen(true)}
                                 />
                             </div>
                         </div>
@@ -530,17 +830,26 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                             onReject={props.onRejectChanges}
                         />
                     )}
-                </section>
+                </main>
             </div>
 
-            {/* Overlay during drag so iframes / editors don't swallow the
-                pointer events and break the drag interaction. */}
             {isDragging && (
-                <div
-                    aria-hidden
-                    className="fixed inset-0 z-50 cursor-col-resize"
-                />
+                <div aria-hidden className="fixed inset-0 z-50 cursor-col-resize" />
             )}
+
+            <CommandPalette
+                open={paletteOpen}
+                onOpenChange={setPaletteOpen}
+                commands={commands}
+                files={fileList}
+                mode={paletteMode}
+                onOpenFile={(path) => {
+                    props.onSelectFile(path);
+                    setView('editor');
+                }}
+            />
+
+            <EditorSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
         </div>
     );
 }
