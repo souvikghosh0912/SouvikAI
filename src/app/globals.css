@@ -98,12 +98,12 @@
     .dark {
         /* Editor tokens (dark) — VS Code-inspired neutral grays */
         --editor-bg: 0 0% 12%;
-        --editor-bg-2: 0 0% 15%;
-        --editor-bg-3: 0 0% 18%;
+        --editor-bg-2: 0 0% 12%;
+        --editor-bg-3: 0 0% 22%;
         --editor-fg: 0 0% 83%;
-        --editor-fg-muted: 0 0% 52%;
-        --editor-fg-subtle: 0 0% 80%;
-        --editor-border: 0 0% 24%;
+        --editor-fg-muted: 0 0% 80%;
+        --editor-fg-subtle: 0 0% 60%;
+        --editor-border: 0 0% 18%;
         --editor-border-strong: 0 0% 32%;
         --editor-active-line: 0 0% 16%;
         --editor-selection: 210 60% 30%;
