@@ -51,7 +51,7 @@ interface CodeEditorProps {
     onPositionChange?: (line: number, col: number) => void;
     /** Optional ref for the host element so the parent can read scroll
         position (used by the Minimap). */
-    hostRef?: React.RefObject<HTMLDivElement | null>;
+    hostRef?: React.RefObject<HTMLDivElement>;
 }
 
 export interface CodeEditorHandle {
