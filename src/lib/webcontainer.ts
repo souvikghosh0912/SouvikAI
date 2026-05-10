@@ -10,7 +10,11 @@ export async function getWebContainer() {
             webcontainerInstance = (window as any).__webcontainerInstance;
             return webcontainerInstance as WebContainer;
         }
-        webcontainerInstance = await WebContainer.boot({ coep: 'none' });
+        // Must match the COEP value the document is served with.
+        // See next.config.js — we set COEP: credentialless on /code/* so
+        // the parent page is cross-origin isolated and SharedArrayBuffer
+        // is available, which WebContainer requires to boot.
+        webcontainerInstance = await WebContainer.boot({ coep: 'credentialless' });
         if (typeof window !== 'undefined') {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (window as any).__webcontainerInstance = webcontainerInstance;
