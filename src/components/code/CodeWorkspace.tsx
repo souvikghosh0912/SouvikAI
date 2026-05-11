@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
     ChevronsLeft,
@@ -12,10 +12,8 @@ import {
     Eye,
     Database,
     ChevronDown,
-    SquareTerminal,
+    Terminal,
     MoreHorizontal,
-    Copy,
-    Columns2,
     GitCompare,
     Map as MapIcon,
     PanelLeft,
@@ -76,6 +74,34 @@ function clampWidth(width: number, viewport: number): number {
         Math.min(CHAT_WIDTH_MAX_FALLBACK, viewport - 360),
     );
     return Math.max(CHAT_WIDTH_MIN, Math.min(upper, width));
+}
+
+interface HeaderIconProps {
+    label: string;
+    icon: ReactNode;
+    active?: boolean;
+    onClick?: () => void;
+}
+
+function HeaderIcon({ label, icon, active, onClick }: HeaderIconProps) {
+    return (
+        <SimpleTooltip content={label} side="bottom">
+            <button
+                type="button"
+                aria-label={label}
+                aria-pressed={active}
+                onClick={onClick}
+                className={cn(
+                    'inline-flex items-center justify-center h-8 w-8 rounded-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-editor-accent',
+                    active
+                        ? 'text-editor-fg bg-editor-bg-3'
+                        : 'text-editor-fg-subtle hover:text-editor-fg hover:bg-editor-bg-3',
+                )}
+            >
+                {icon}
+            </button>
+        </SimpleTooltip>
+    );
 }
 
 /** Outer wrapper that mounts the EditorSettingsProvider before the inner
@@ -627,7 +653,7 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
 
                 <HeaderIcon
                     label="Toggle Terminal"
-                    icon={<SquareTerminal className="h-4 w-4" />}
+                    icon={<Terminal className="h-4 w-4" />}
                 />
                 <HeaderIcon
                     label="Command palette (⌘⇧P)"
