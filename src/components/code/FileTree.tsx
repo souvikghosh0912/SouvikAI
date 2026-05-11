@@ -9,6 +9,11 @@ interface FileTreeProps {
     files: BuilderFiles;
     activeFile: string | null;
     onSelectFile: (path: string) => void;
+    /**
+     * When this number changes, every expanded folder is collapsed.
+     * Used by the Explorer header's "Collapse Folders" action.
+     */
+    collapseSignal?: number;
 }
 
 interface TreeNode {
@@ -79,7 +84,7 @@ function flatten(root: TreeNode, expanded: Set<string>): FlatRow[] {
  *  Enter / Space   — open file or toggle folder
  *  Letter keys     — typeahead jump
  */
-export function FileTree({ files, activeFile, onSelectFile }: FileTreeProps) {
+export function FileTree({ files, activeFile, onSelectFile, collapseSignal }: FileTreeProps) {
     const tree = useMemo(() => buildTree(files), [files]);
 
     // Default-expand the top-level folders so the tree isn't a wall of
@@ -101,6 +106,12 @@ export function FileTree({ files, activeFile, onSelectFile }: FileTreeProps) {
 
     const treeRef = useRef<HTMLDivElement>(null);
     const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+    // Collapse-all signal from the Explorer header.
+    useEffect(() => {
+        if (collapseSignal === undefined) return;
+        setExpanded(new Set());
+    }, [collapseSignal]);
 
     // When the active file changes externally, expand its ancestors and
     // sync our internal focus.

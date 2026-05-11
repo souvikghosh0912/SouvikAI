@@ -96,26 +96,28 @@
     }
 
     .dark {
-        /* Editor tokens (dark) — VS Code-inspired neutral grays */
-        --editor-bg: 0 0% 12%;
-        --editor-bg-2: 0 0% 12%;
-        --editor-bg-3: 0 0% 22%;
-        --editor-fg: 0 0% 83%;
-        --editor-fg-muted: 0 0% 80%;
-        --editor-fg-subtle: 0 0% 60%;
-        --editor-border: 0 0% 18%;
-        --editor-border-strong: 0 0% 32%;
+        /* Editor tokens (dark) — VS Code Dark+ inspired
+           Sidebar (#181818) is slightly darker than editor (#1e1e1e) so the
+           active editor "rises" out of the chrome, matching VS Code. */
+        --editor-bg: 0 0% 12%;            /* #1e1e1e — editor surface */
+        --editor-bg-2: 0 0% 9%;           /* #181818 — sidebar / tab bar */
+        --editor-bg-3: 210 5% 18%;        /* #2a2d2e — hover row */
+        --editor-fg: 0 0% 80%;            /* #cccccc */
+        --editor-fg-muted: 0 0% 75%;
+        --editor-fg-subtle: 0 0% 52%;     /* #858585 */
+        --editor-border: 0 0% 9%;         /* matches sidebar — no visible seam */
+        --editor-border-strong: 0 0% 22%;
         --editor-active-line: 0 0% 16%;
         --editor-selection: 210 60% 30%;
         --editor-cursor: 0 0% 100%;
-        --editor-accent: 207 100% 50%;
+        --editor-accent: 207 100% 42%;    /* #007acc — VS Code blue */
         --editor-accent-fg: 0 0% 100%;
         --editor-gutter-bg: 0 0% 12%;
         --editor-gutter-fg: 0 0% 52%;
         --editor-gutter-active-fg: 0 0% 90%;
-        --editor-tab-active: 0 0% 12%;
-        --editor-tab-inactive: 0 0% 18%;
-        --editor-tab-bar: 0 0% 18%;
+        --editor-tab-active: 0 0% 12%;    /* same as editor-bg — seamless */
+        --editor-tab-inactive: 0 0% 9%;   /* matches tab bar */
+        --editor-tab-bar: 0 0% 9%;
         --editor-find-match: 51 100% 50%;
         --editor-find-match-active: 30 100% 50%;
         --editor-status-bg: 207 100% 42%;

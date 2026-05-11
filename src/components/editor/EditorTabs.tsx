@@ -10,6 +10,11 @@ interface EditorTabsProps {
     dirtyPaths?: Set<string>;
     onSelect: (path: string) => void;
     onClose: (path: string) => void;
+    /**
+     * Optional trailing slot rendered at the far right of the tab bar
+     * (e.g. Copy / Split-pane / More-actions icons in VS Code).
+     */
+    trailingSlot?: React.ReactNode;
 }
 
 const EXT_COLOUR: Record<string, string> = {
@@ -100,18 +105,18 @@ export function EditorTabs({ openTabs, activePath, dirtyPaths = new Set(), onSel
                         onClick={() => onSelect(path)}
                         onKeyDown={e => onKeyDown(e, path)}
                         className={cn(
-                            'group flex items-center gap-1.5 px-3 h-full text-[13px] cursor-pointer whitespace-nowrap border-r border-editor-border select-none transition-colors duration-100 relative',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-editor-accent',
+                            'group flex items-center gap-2 pl-3 pr-2 h-full text-[13px] cursor-pointer whitespace-nowrap border-r border-editor-border select-none transition-colors duration-100 relative',
+                            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-editor-accent',
                             isActive
                                 ? 'bg-editor-tab-active text-editor-fg'
-                                : 'bg-editor-tab-inactive text-editor-fg-muted hover:bg-editor-bg-3 hover:text-editor-fg',
+                                : 'bg-editor-tab-inactive text-editor-fg-muted hover:text-editor-fg',
                         )}
-                        style={{ minWidth: 100, maxWidth: 180 }}
+                        style={{ minWidth: 120, maxWidth: 220 }}
                     >
                         {isActive && (
                             <span
                                 aria-hidden="true"
-                                className="absolute top-0 left-0 right-0 h-[2px] bg-editor-accent rounded-b"
+                                className="absolute top-0 left-0 right-0 h-px bg-editor-accent"
                             />
                         )}
 
@@ -128,7 +133,7 @@ export function EditorTabs({ openTabs, activePath, dirtyPaths = new Set(), onSel
                             onClick={e => { e.stopPropagation(); onClose(path); }}
                             aria-label={`Close ${name}${isDirty ? ' (unsaved changes)' : ''}`}
                             tabIndex={-1}
-                            className="flex items-center justify-center w-5 h-5 rounded hover:bg-editor-fg/10 shrink-0 ml-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-editor-accent"
+                            className="flex items-center justify-center w-5 h-5 hover:bg-editor-fg/10 shrink-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-editor-accent"
                         >
                             {isDirty
                                 ? <Circle aria-hidden="true" className="w-2.5 h-2.5 fill-current text-editor-fg-subtle" />
