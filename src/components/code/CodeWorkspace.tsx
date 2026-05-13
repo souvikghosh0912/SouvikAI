@@ -21,6 +21,8 @@ import {
     SplitSquareHorizontal,
     Type,
     Accessibility,
+    Maximize2,
+    Minimize2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button, SimpleTooltip } from '@/components/ui';
@@ -127,6 +129,7 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
     const [paletteMode, setPaletteMode] = useState<'command' | 'files'>('command');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [collapseSignal, setCollapseSignal] = useState(0);
+    const [editorFullscreen, setEditorFullscreen] = useState(false);
 
     const editorRef = useRef<CodeEditorHandle>(null);
     const editorHostRef = useRef<HTMLDivElement>(null);
@@ -559,7 +562,12 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
 
     return (
         <div
-            className="flex flex-col h-screen w-full bg-background overflow-hidden"
+            className={cn(
+                'flex flex-col bg-background overflow-hidden',
+                editorFullscreen
+                    ? 'fixed inset-0 z-[90] h-screen w-screen'
+                    : 'h-screen w-full',
+            )}
             data-editor-theme={editorThemeAttr}
         >
             {/* Skip links — visible only on focus, give keyboard users
@@ -603,6 +611,7 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
 
                 <span className="h-5 w-px bg-editor-border-strong mx-1" aria-hidden />
 
+                {/* View icons: Preview / Editor / Data */}
                 <HeaderIcon
                     label="Preview"
                     icon={<Eye className="h-4 w-4" />}
@@ -620,6 +629,25 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                     icon={<Database className="h-4 w-4" />}
                     active={false}
                 />
+
+                <span className="h-5 w-px bg-editor-border-strong mx-1" aria-hidden />
+
+                {/* Latest version selector + terminal + more — directly beside the view icons */}
+                <SimpleTooltip content="Latest version" side="bottom">
+                    <button
+                        type="button"
+                        className="hidden md:inline-flex items-center gap-1 h-8 px-2 text-[12px] text-editor-fg-muted hover:text-editor-fg hover:bg-editor-bg-3 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-editor-accent"
+                    >
+                        Latest
+                        <ChevronDown className="h-3 w-3 opacity-70" />
+                    </button>
+                </SimpleTooltip>
+
+                <HeaderIcon
+                    label="Toggle Terminal"
+                    icon={<Terminal className="h-4 w-4" />}
+                />
+                <HeaderIcon label="More" icon={<MoreHorizontal className="h-4 w-4" />} />
 
                 <h1 className="ml-3 text-[12px] font-medium text-editor-fg-muted truncate min-w-0 hidden md:block">
                     {props.title}
@@ -641,20 +669,6 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                     </button>
                 )}
 
-                <SimpleTooltip content="Latest version" side="bottom">
-                    <button
-                        type="button"
-                        className="hidden md:inline-flex items-center gap-1 h-8 px-2 text-[13px] text-editor-fg-muted hover:text-editor-fg hover:bg-editor-bg-3 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-editor-accent"
-                    >
-                        Latest
-                        <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-                    </button>
-                </SimpleTooltip>
-
-                <HeaderIcon
-                    label="Toggle Terminal"
-                    icon={<Terminal className="h-4 w-4" />}
-                />
                 <HeaderIcon
                     label="Command palette (⌘⇧P)"
                     icon={<Search className="h-4 w-4" />}
@@ -665,7 +679,14 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                     icon={<SettingsIcon className="h-4 w-4" />}
                     onClick={() => setSettingsOpen(true)}
                 />
-                <HeaderIcon label="More" icon={<MoreHorizontal className="h-4 w-4" />} />
+
+                {/* Editor full screen toggle */}
+                <HeaderIcon
+                    label={editorFullscreen ? 'Exit Full Screen' : 'Editor Full Screen'}
+                    icon={editorFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                    active={editorFullscreen}
+                    onClick={() => setEditorFullscreen((v) => !v)}
+                />
 
                 {/* Mobile-only segmented switch */}
                 <div
@@ -709,6 +730,7 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                     style={isDesktop ? { width: `${chatWidth}px` } : undefined}
                     className={cn(
                         'bg-background flex flex-col min-h-0',
+                        editorFullscreen ? 'hidden' : '',
                         mobileTab === 'chat' ? 'flex' : 'hidden',
                         'md:flex md:shrink-0 md:w-[360px] border-r border-border-subtle md:border-r-0',
                     )}
@@ -730,6 +752,7 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                     role="separator"
                     aria-orientation="vertical"
                     aria-label="Resize chat panel"
+                    aria-hidden={editorFullscreen}
                     aria-valuemin={CHAT_WIDTH_MIN}
                     aria-valuemax={CHAT_WIDTH_MAX_FALLBACK}
                     aria-valuenow={Math.round(chatWidth)}
@@ -745,6 +768,7 @@ function CodeWorkspaceInner(props: CodeWorkspaceProps) {
                         'bg-border-subtle hover:bg-foreground/30 transition-colors',
                         'focus:outline-none focus-visible:bg-foreground/40',
                         isDragging && 'bg-foreground/40',
+                        editorFullscreen && '!hidden',
                     )}
                 >
                     <span aria-hidden className="absolute inset-y-0 -left-1.5 -right-1.5" />

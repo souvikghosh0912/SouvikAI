@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, File, Folder, FolderOpen } from 'lucide-react';
+import { ChevronRight, File } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { BuilderFiles } from '@/types/code';
 
@@ -260,7 +260,7 @@ export function FileTree({ files, activeFile, onSelectFile, collapseSignal }: Fi
             aria-label="Project files"
             aria-multiselectable={false}
             onKeyDown={handleKeyDown}
-            className="text-[13px] text-editor-fg-muted py-1 select-none focus:outline-none"
+            className="text-[11px] text-editor-fg-muted py-0.5 select-none focus:outline-none"
         >
             {rows.map(({ node, depth }) => {
                 const isActive = activeFile === node.path;
@@ -284,9 +284,9 @@ export function FileTree({ files, activeFile, onSelectFile, collapseSignal }: Fi
                             }
                         }}
                         onFocus={() => setFocusedPath(node.path)}
-                        style={{ paddingLeft: 8 + depth * 12 + (node.isDir ? 0 : 16) }}
+                        style={{ paddingLeft: 6 + depth * 12 + (node.isDir ? 0 : 14) }}
                         className={cn(
-                            'flex items-center gap-1.5 h-[22px] pr-2 cursor-pointer transition-colors',
+                            'flex items-center gap-1 h-[20px] pr-2 cursor-pointer transition-colors',
                             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-editor-accent',
                             isActive
                                 ? 'bg-editor-bg-3 text-editor-fg'
@@ -298,20 +298,31 @@ export function FileTree({ files, activeFile, onSelectFile, collapseSignal }: Fi
                                 <ChevronRight
                                     aria-hidden="true"
                                     className={cn(
-                                        'h-3 w-3 shrink-0 transition-transform motion-reduce:transition-none',
+                                        'h-2.5 w-2.5 shrink-0 transition-transform motion-reduce:transition-none',
                                         isOpen && 'rotate-90',
                                     )}
                                 />
-                                {isOpen ? (
-                                    <FolderOpen aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-                                ) : (
-                                    <Folder aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-                                )}
+                                {/* Plain outline folder icon matching VS Code style */}
+                                <svg
+                                    aria-hidden="true"
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 16 16"
+                                    fill="none"
+                                    className="shrink-0 text-editor-fg-muted"
+                                >
+                                    <path
+                                        d="M1.5 3.5h4.25l1.5 1.5H14.5v7.5H1.5v-9z"
+                                        stroke="currentColor"
+                                        strokeWidth="1"
+                                        fill="none"
+                                    />
+                                </svg>
                             </>
                         ) : (
-                            <File aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                            <File aria-hidden="true" className="h-3 w-3 shrink-0" />
                         )}
-                        <span className="truncate">{node.name}</span>
+                        <span className="truncate leading-none">{node.name}</span>
                     </div>
                 );
             })}
