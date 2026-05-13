@@ -45,7 +45,7 @@ export function ExplorerHeader({ title, onCollapseAll }: ExplorerHeaderProps) {
             {/* Title + tree actions row */}
             <div className="group/header flex items-center h-9 pl-3 pr-1 bg-editor-bg-2">
                 <span
-                    className="text-[11px] font-semibold uppercase tracking-wide text-editor-fg-subtle truncate"
+                    className="text-[10px] font-semibold uppercase tracking-wider text-editor-fg-subtle truncate"
                     title={title}
                 >
                     {title}
