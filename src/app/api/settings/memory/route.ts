@@ -94,7 +94,8 @@ export async function POST(request: NextRequest) {
 
         const { data: inserted, error } = await supabase
             .from('user_memories')
-            .insert({ user_id: user.id, content: trimmed, source: normalizedSource })
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .insert({ user_id: user.id, content: trimmed, source: normalizedSource } as any)
             .select('id, content, source, created_at')
             .single();
 
@@ -130,7 +131,8 @@ export async function PATCH(request: NextRequest) {
             return NextResponse.json({ error: '`enabled` must be a boolean' }, { status: 400 });
         }
 
-        const { error } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase as any)
             .from('profiles')
             .update({ memory_enabled: enabled })
             .eq('id', user.id);

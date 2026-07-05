@@ -39,6 +39,7 @@ export interface Database {
                     updated_at?: string;
                     memory_enabled?: boolean;
                 };
+                Relationships: [];
             };
             user_memories: {
                 Row: {
@@ -62,6 +63,7 @@ export interface Database {
                     source?: 'manual' | 'auto';
                     created_at?: string;
                 };
+                Relationships: [];
             };
             chat_sessions: {
                 Row: {
@@ -94,6 +96,7 @@ export interface Database {
                     branched_from_session_id?: string | null;
                     branched_from_title?: string | null;
                 };
+                Relationships: [];
             };
             projects: {
                 Row: {
@@ -117,6 +120,7 @@ export interface Database {
                     created_at?: string;
                     updated_at?: string;
                 };
+                Relationships: [];
             };
             chat_messages: {
                 Row: {
@@ -146,6 +150,7 @@ export interface Database {
                     created_at?: string;
                     attachments?: unknown | null;
                 };
+                Relationships: [];
             };
             requests_log: {
                 Row: {
@@ -166,6 +171,7 @@ export interface Database {
                     created_at?: string;
                     status?: 'completed' | 'failed' | 'aborted';
                 };
+                Relationships: [];
             };
             builder_workspaces: {
                 Row: {
@@ -192,6 +198,7 @@ export interface Database {
                     created_at?: string;
                     updated_at?: string;
                 };
+                Relationships: [];
             };
             builder_files: {
                 Row: {
@@ -218,6 +225,7 @@ export interface Database {
                     created_at?: string;
                     updated_at?: string;
                 };
+                Relationships: [];
             };
             builder_messages: {
                 Row: {
@@ -250,6 +258,7 @@ export interface Database {
                     errored?: boolean;
                     created_at?: string;
                 };
+                Relationships: [];
             };
             models: {
                 Row: {
@@ -291,6 +300,7 @@ export interface Database {
                     created_at?: string;
                     updated_at?: string;
                 };
+                Relationships: [];
             };
             system_prompts: {
                 Row: {
@@ -320,6 +330,7 @@ export interface Database {
                     created_at?: string;
                     updated_at?: string;
                 };
+                Relationships: [];
             };
             custom_providers: {
                 Row: {
@@ -349,6 +360,7 @@ export interface Database {
                     created_at?: string;
                     updated_at?: string;
                 };
+                Relationships: [];
             };
             admin_settings: {
                 Row: {
@@ -375,7 +387,36 @@ export interface Database {
                     edit_mode?: boolean;
                     updated_at?: string;
                 };
+                Relationships: [];
+            };
+            token_usage: {
+                Row: {
+                    id: string;
+                    user_id: string;
+                    model_id: string;
+                    tokens_used: number;
+                    created_at: string;
+                };
+                Insert: {
+                    id?: string;
+                    user_id: string;
+                    model_id: string;
+                    tokens_used?: number;
+                    created_at?: string;
+                };
+                Update: {
+                    id?: string;
+                    user_id?: string;
+                    model_id?: string;
+                    tokens_used?: number;
+                    created_at?: string;
+                };
+                Relationships: [];
             };
         };
+        Views: Record<string, never>;
+        Functions: Record<string, never>;
+        Enums: Record<string, never>;
+        CompositeTypes: Record<string, never>;
     };
 }

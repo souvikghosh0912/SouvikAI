@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
         const supabase = await createServiceClient();
         const { data, error } = await supabase
             .from('custom_providers')
-            .insert({ name: name.trim(), base_url: base_url.trim(), api_key: api_key.trim(), protocol })
+            .insert({ name: name.trim(), base_url: base_url.trim(), api_key: api_key.trim(), protocol: protocol as 'openai' | 'anthropic' | 'gemini' })
             .select('id, name, base_url, protocol, api_key')
             .single();
 
