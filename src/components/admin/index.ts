@@ -8,6 +8,7 @@ export { SystemPromptsTable } from './SystemPromptsTable';
 export { AISettingsForm } from './AISettingsForm';
 export { ModelsTable } from './ModelsTable';
 export { CustomProviderPickerDialog } from './CustomProviderPickerDialog';
+export { ModelTrustedUsersDialog } from './ModelTrustedUsersDialog';
 export { CustomProviderForm } from './CustomProviderForm';
 export type { CustomProviderFormValues } from './CustomProviderForm';
 export { AnalyticsDashboard } from './AnalyticsDashboard';

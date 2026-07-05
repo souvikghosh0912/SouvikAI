@@ -204,6 +204,35 @@ export function useAdmin() {
         }
     }, [fetchModels]);
 
+    const createModel = useCallback(async (values: {
+        id: string;
+        name: string;
+        displayName: string;
+        quota_limit: number;
+        provider: AIModel['provider'];
+        protocol?: 'openai' | 'anthropic' | null;
+        custom_provider_id?: string | null;
+        system_prompt_id?: string | null;
+        visibility: AIModel['visibility'];
+        trusted_user_ids?: string[];
+    }) => {
+        try {
+            const response = await fetch('/api/admin/models', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(values),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                await fetchModels();
+                return { success: true, id: data.id as string };
+            }
+            return { success: false, error: data.error as string | undefined };
+        } catch {
+            return { success: false, error: 'Failed to create model' };
+        }
+    }, [fetchModels]);
+
     const fetchStats = useCallback(async () => {
         try {
             const response = await fetch('/api/admin/stats', { cache: 'no-store' });
@@ -366,6 +395,7 @@ export function useAdmin() {
         models,
         fetchModels,
         updateModel,
+        createModel,
         systemPrompts,
         fetchSystemPrompts,
         createSystemPrompt,

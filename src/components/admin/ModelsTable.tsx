@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button, SimpleTooltip } from '@/components/ui';
 import { AIModel, SystemPrompt } from '@/types/chat';
 import { PROVIDER_META } from '@/lib/constants/providers';
+import { VISIBILITY_META } from '@/lib/constants/visibility';
 import { Settings2, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 interface ModelsTableProps {
@@ -21,6 +22,19 @@ function ProviderBadge({ provider }: { provider: AIModel['provider'] }) {
             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${meta.className}`}
         >
             {meta.label}
+        </span>
+    );
+}
+
+function VisibilityBadge({ model }: { model: AIModel }) {
+    const visibility = model.visibility ?? 'public';
+    const meta = VISIBILITY_META[visibility] ?? VISIBILITY_META.public;
+    const label = visibility === 'selected' ? `${meta.label} (${model.trusted_user_count ?? 0})` : meta.label;
+    return (
+        <span
+            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${meta.className}`}
+        >
+            {label}
         </span>
     );
 }
@@ -56,6 +70,7 @@ export function ModelsTable({ models, systemPrompts, isEditMode, onUpdate }: Mod
                                 <th className="px-6 py-3 font-medium">API Identifier (Name)</th>
                                 <th className="px-6 py-3 font-medium">Quota Limit</th>
                                 <th className="px-6 py-3 font-medium">System Prompt</th>
+                                <th className="px-6 py-3 font-medium">Visibility</th>
                                 <th className="px-6 py-3 font-medium">Status</th>
                                 {isEditMode && <th className="px-6 py-3 text-right font-medium text-destructive">Actions</th>}
                             </tr>
@@ -84,6 +99,9 @@ export function ModelsTable({ models, systemPrompts, isEditMode, onUpdate }: Mod
                                                 Default
                                             </span>
                                         )}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <VisibilityBadge model={model} />
                                     </td>
                                     <td className="px-6 py-4">
                                         <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${model.is_suspended ? 'bg-destructive/20 text-destructive' : 'bg-emerald-500/20 text-emerald-500'}`}>

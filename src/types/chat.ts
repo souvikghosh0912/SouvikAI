@@ -83,6 +83,12 @@ export interface AIModel {
     custom_provider_id?: string | null;
     /** References a system_prompts row. NULL falls back to the default prompt. */
     system_prompt_id?: string | null;
+    /** public: visible to everyone. internal: not visible to anyone yet. selected: only trusted users (see model_trusted_users). */
+    visibility: 'public' | 'internal' | 'selected';
+    /** User ids trusted for this model. Only meaningful when visibility === 'selected'; populated on demand (e.g. edit page load), not by the list endpoints. */
+    trusted_user_ids?: string[];
+    /** Count of trusted users for this model. Only meaningful when visibility === 'selected'; populated by the admin models list endpoint. */
+    trusted_user_count?: number;
 }
 
 /** Reusable third-party provider credentials an admin can assign to models. */

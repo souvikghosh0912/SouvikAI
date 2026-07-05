@@ -271,6 +271,7 @@ export interface Database {
                     protocol: 'openai' | 'anthropic' | null;
                     custom_provider_id: string | null;
                     system_prompt_id: string | null;
+                    visibility: 'public' | 'internal' | 'selected';
                     created_at: string;
                     updated_at: string;
                 };
@@ -284,6 +285,7 @@ export interface Database {
                     protocol?: 'openai' | 'anthropic' | null;
                     custom_provider_id?: string | null;
                     system_prompt_id?: string | null;
+                    visibility?: 'public' | 'internal' | 'selected';
                     created_at?: string;
                     updated_at?: string;
                 };
@@ -297,8 +299,27 @@ export interface Database {
                     protocol?: 'openai' | 'anthropic' | null;
                     custom_provider_id?: string | null;
                     system_prompt_id?: string | null;
+                    visibility?: 'public' | 'internal' | 'selected';
                     created_at?: string;
                     updated_at?: string;
+                };
+                Relationships: [];
+            };
+            model_trusted_users: {
+                Row: {
+                    model_id: string;
+                    user_id: string;
+                    created_at: string;
+                };
+                Insert: {
+                    model_id: string;
+                    user_id: string;
+                    created_at?: string;
+                };
+                Update: {
+                    model_id?: string;
+                    user_id?: string;
+                    created_at?: string;
                 };
                 Relationships: [];
             };

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
     Button,
     Input,
@@ -18,7 +18,8 @@ import { AIModel } from '@/types/chat';
 import { PROVIDER_META } from '@/lib/constants/providers';
 import { VISIBILITY_META } from '@/lib/constants/visibility';
 
-interface ModelEditDraft {
+interface ModelNewDraft {
+    id: string;
     displayName: string;
     apiName: string;
     provider: AIModel['provider'];
@@ -31,74 +32,53 @@ interface ModelEditDraft {
     trustedUserIds: string[];
 }
 
-function draftKey(modelId: string) {
-    return `admin:model-edit-draft:${modelId}`;
-}
+const DRAFT_KEY = 'admin:model-new-draft';
+const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
-export default function ModelConfigPage() {
-    const { modelId } = useParams<{ modelId: string }>();
+export default function NewModelPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { models, systemPrompts, isLoading, updateModel } = useAdmin();
+    const { systemPrompts, createModel } = useAdmin();
 
-    const model = models.find((m) => m.id === modelId) ?? null;
-    const initialized = useRef(false);
-
+    const [id, setId] = useState('');
     const [displayName, setDisplayName] = useState('');
     const [apiName, setApiName] = useState('');
     const [provider, setProvider] = useState<AIModel['provider']>('nvidia');
     const [protocol, setProtocol] = useState<'openai' | 'anthropic'>('openai');
     const [customProviderId, setCustomProviderId] = useState<string | null>(null);
     const [customProviderName, setCustomProviderName] = useState<string | null>(null);
-    const [quotaLimit, setQuotaLimit] = useState('');
+    const [quotaLimit, setQuotaLimit] = useState('500000');
     const [systemPromptId, setSystemPromptId] = useState<string | null>(null);
     const [visibility, setVisibility] = useState<AIModel['visibility']>('public');
     const [trustedUserIds, setTrustedUserIds] = useState<string[]>([]);
     const [isPickerOpen, setIsPickerOpen] = useState(false);
     const [isTrustedUsersDialogOpen, setIsTrustedUsersDialogOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    // Initialize the form from the loaded model, once — background refreshes
-    // of `models` (e.g. after save) shouldn't clobber in-progress edits.
+    // Restore a draft after returning from the "add new custom provider" page.
     useEffect(() => {
-        if (initialized.current || !model) return;
-        initialized.current = true;
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setDisplayName(model.displayName || (model as any).display_name || '');
-        setApiName(model.name || '');
-        setProvider(model.provider ?? 'nvidia');
-        setProtocol(model.protocol ?? 'openai');
-        setCustomProviderId(model.custom_provider_id ?? null);
-        setQuotaLimit((model.quota_limit || 0).toString());
-        setSystemPromptId(model.system_prompt_id ?? null);
-        setVisibility(model.visibility ?? 'public');
-
-        const draftRaw = sessionStorage.getItem(draftKey(modelId));
-        if (draftRaw) {
-            sessionStorage.removeItem(draftKey(modelId));
-            try {
-                const draft = JSON.parse(draftRaw) as ModelEditDraft;
-                setDisplayName(draft.displayName);
-                setApiName(draft.apiName);
-                setProvider(draft.provider);
-                setProtocol(draft.protocol);
-                setCustomProviderId(draft.customProviderId);
-                setCustomProviderName(draft.customProviderName);
-                setQuotaLimit(draft.quotaLimit);
-                setSystemPromptId(draft.systemPromptId);
-                setVisibility(draft.visibility ?? model.visibility ?? 'public');
-                setTrustedUserIds(draft.trustedUserIds ?? []);
-            } catch {
-                // ignore malformed draft
-            }
-        } else if (model.visibility === 'selected') {
-            fetch(`/api/admin/models/${modelId}/trusted-users`)
-                .then((res) => res.json())
-                .then((data) => setTrustedUserIds(Array.isArray(data.userIds) ? data.userIds : []))
-                .catch(() => {});
+        const draftRaw = sessionStorage.getItem(DRAFT_KEY);
+        if (!draftRaw) return;
+        sessionStorage.removeItem(DRAFT_KEY);
+        try {
+            const draft = JSON.parse(draftRaw) as ModelNewDraft;
+            setId(draft.id);
+            setDisplayName(draft.displayName);
+            setApiName(draft.apiName);
+            setProvider(draft.provider);
+            setProtocol(draft.protocol);
+            setCustomProviderId(draft.customProviderId);
+            setCustomProviderName(draft.customProviderName);
+            setQuotaLimit(draft.quotaLimit);
+            setSystemPromptId(draft.systemPromptId);
+            setVisibility(draft.visibility ?? 'public');
+            setTrustedUserIds(draft.trustedUserIds ?? []);
+        } catch {
+            // ignore malformed draft
         }
-    }, [model, modelId]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Returning from the "add new provider" page with a freshly created provider.
     useEffect(() => {
@@ -108,26 +88,13 @@ export default function ModelConfigPage() {
         setProvider('custom');
         setCustomProviderId(newProviderId);
         setCustomProviderName(newProviderName ? decodeURIComponent(newProviderName) : null);
-        router.replace(`/admin/models/${modelId}`);
+        router.replace('/admin/models/new');
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
 
-    // Resolve the saved custom provider's display name when it wasn't just picked/created.
-    useEffect(() => {
-        if (provider !== 'custom' || !customProviderId || customProviderName) return;
-        fetch('/api/admin/custom-providers')
-            .then((res) => res.json())
-            .then((data) => {
-                if (!Array.isArray(data)) return;
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const match = data.find((p: any) => p.id === customProviderId);
-                if (match) setCustomProviderName(match.name);
-            })
-            .catch(() => {});
-    }, [provider, customProviderId, customProviderName]);
-
     const handleAddNewProvider = () => {
-        const draft: ModelEditDraft = {
+        const draft: ModelNewDraft = {
+            id,
             displayName,
             apiName,
             provider,
@@ -139,72 +106,72 @@ export default function ModelConfigPage() {
             visibility,
             trustedUserIds,
         };
-        sessionStorage.setItem(draftKey(modelId), JSON.stringify(draft));
-        router.push(`/admin/models/providers/new?returnTo=${encodeURIComponent(`/admin/models/${modelId}`)}`);
+        sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+        router.push(`/admin/models/providers/new?returnTo=${encodeURIComponent('/admin/models/new')}`);
     };
 
     const handleSave = async () => {
         setIsSaving(true);
-        const updates: Partial<AIModel> = {
-            displayName,
+        setError(null);
+        const result = await createModel({
+            id: id.trim(),
             name: apiName,
-            provider,
+            displayName,
             quota_limit: parseInt(quotaLimit, 10),
-            system_prompt_id: systemPromptId,
-            visibility,
+            provider,
             ...(provider === 'freemodel' ? { protocol } : {}),
             ...(provider === 'custom' ? { custom_provider_id: customProviderId } : {}),
+            system_prompt_id: systemPromptId,
+            visibility,
             ...(visibility === 'selected' ? { trusted_user_ids: trustedUserIds } : {}),
-        };
-        const result = await updateModel(modelId, updates);
+        });
         setIsSaving(false);
         if (result.success) {
             router.push('/admin/models');
+        } else {
+            setError(result.error || 'Failed to create model');
         }
     };
 
     const isSaveDisabled =
         isSaving ||
+        !id.trim() ||
+        !ID_PATTERN.test(id.trim()) ||
         !displayName.trim() ||
         !apiName.trim() ||
         !quotaLimit.trim() ||
         (provider === 'custom' && !customProviderId);
 
-    if (isLoading && !model) {
-        return <p className="text-muted-foreground">Loading model...</p>;
-    }
-
-    if (!isLoading && !model) {
-        return (
-            <div className="space-y-4">
-                <p className="text-muted-foreground">Model not found.</p>
-                <Button variant="outline" onClick={() => router.push('/admin/models')}>
-                    Back to Model Configurations
-                </Button>
-            </div>
-        );
-    }
-
     return (
         <div className="space-y-6 max-w-2xl">
             <div>
-                <h1 className="text-2xl font-bold">Configure Model</h1>
-                <p className="text-muted-foreground">Edit this model&apos;s name, provider, identifier, and quota.</p>
+                <h1 className="text-2xl font-bold">Add Model</h1>
+                <p className="text-muted-foreground">Create a new model, assign a provider, and set who can see it.</p>
             </div>
 
+            {error && <p className="text-sm text-destructive">{error}</p>}
+
             <div className="bg-card rounded-lg border border-border p-6 space-y-4">
-                {/* Internal ID — read-only */}
+                {/* Internal ID */}
                 <div className="space-y-2">
-                    <Label>Internal ID</Label>
-                    <Input value={modelId} disabled className="bg-muted font-mono text-xs" />
-                    <p className="text-xs text-muted-foreground">Internal ID cannot be changed.</p>
+                    <Label htmlFor="new-model-id">Internal ID</Label>
+                    <Input
+                        id="new-model-id"
+                        value={id}
+                        onChange={(e) => setId(e.target.value.toLowerCase())}
+                        placeholder="e.g. velocity-1"
+                        className="font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        Lowercase letters, numbers, and hyphens only. Cannot be changed later.
+                    </p>
                 </div>
 
                 {/* Display name */}
                 <div className="space-y-2">
-                    <Label htmlFor="edit-display-name">Display Name</Label>
+                    <Label htmlFor="new-display-name">Display Name</Label>
                     <Input
-                        id="edit-display-name"
+                        id="new-display-name"
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
                         placeholder="e.g. Velocity 1"
@@ -213,8 +180,8 @@ export default function ModelConfigPage() {
 
                 {/* Provider selector */}
                 <div className="space-y-2">
-                    <Label htmlFor="edit-provider">Provider</Label>
-                    <div className="flex gap-3" id="edit-provider" role="group" aria-label="Provider selection">
+                    <Label htmlFor="new-provider">Provider</Label>
+                    <div className="flex gap-3" id="new-provider" role="group" aria-label="Provider selection">
                         {(Object.keys(PROVIDER_META) as AIModel['provider'][]).map((p) => {
                             const meta = PROVIDER_META[p];
                             const isSelected = provider === p;
@@ -251,9 +218,9 @@ export default function ModelConfigPage() {
                 {/* freemodel.dev format sub-selector */}
                 {provider === 'freemodel' && (
                     <div className="space-y-2">
-                        <Label htmlFor="edit-freemodel-protocol">Format</Label>
+                        <Label htmlFor="new-freemodel-protocol">Format</Label>
                         <Select value={protocol} onValueChange={(v) => setProtocol(v as 'openai' | 'anthropic')}>
-                            <SelectTrigger id="edit-freemodel-protocol">
+                            <SelectTrigger id="new-freemodel-protocol">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -287,9 +254,9 @@ export default function ModelConfigPage() {
 
                 {/* API identifier */}
                 <div className="space-y-2">
-                    <Label htmlFor="edit-api-name">API Identifier (Name)</Label>
+                    <Label htmlFor="new-api-name">API Identifier (Name)</Label>
                     <Input
-                        id="edit-api-name"
+                        id="new-api-name"
                         value={apiName}
                         onChange={(e) => setApiName(e.target.value)}
                         placeholder={
@@ -303,9 +270,9 @@ export default function ModelConfigPage() {
 
                 {/* Quota */}
                 <div className="space-y-2">
-                    <Label htmlFor="edit-quota">Quota Limit (Tokens / 5 hrs)</Label>
+                    <Label htmlFor="new-quota">Quota Limit (Tokens / 5 hrs)</Label>
                     <Input
-                        id="edit-quota"
+                        id="new-quota"
                         type="number"
                         value={quotaLimit}
                         onChange={(e) => setQuotaLimit(e.target.value)}
@@ -315,12 +282,12 @@ export default function ModelConfigPage() {
 
                 {/* System Prompt */}
                 <div className="space-y-2">
-                    <Label htmlFor="edit-system-prompt">System Prompt</Label>
+                    <Label htmlFor="new-system-prompt">System Prompt</Label>
                     <Select
                         value={systemPromptId ?? '__default__'}
                         onValueChange={(v) => setSystemPromptId(v === '__default__' ? null : v)}
                     >
-                        <SelectTrigger id="edit-system-prompt">
+                        <SelectTrigger id="new-system-prompt">
                             <SelectValue placeholder="Default (inherited)" />
                         </SelectTrigger>
                         <SelectContent>
@@ -342,8 +309,8 @@ export default function ModelConfigPage() {
 
                 {/* Visibility */}
                 <div className="space-y-2">
-                    <Label htmlFor="edit-visibility">Visibility</Label>
-                    <div className="flex gap-3" id="edit-visibility" role="group" aria-label="Visibility selection">
+                    <Label htmlFor="new-visibility">Visibility</Label>
+                    <div className="flex gap-3" id="new-visibility" role="group" aria-label="Visibility selection">
                         {(Object.keys(VISIBILITY_META) as AIModel['visibility'][]).map((v) => {
                             const meta = VISIBILITY_META[v];
                             const isSelected = visibility === v;
@@ -380,15 +347,15 @@ export default function ModelConfigPage() {
                     Cancel
                 </Button>
                 <Button onClick={handleSave} disabled={isSaveDisabled}>
-                    {isSaving ? 'Saving...' : 'Save Changes'}
+                    {isSaving ? 'Creating...' : 'Create Model'}
                 </Button>
             </div>
 
             <CustomProviderPickerDialog
                 open={isPickerOpen}
                 onOpenChange={setIsPickerOpen}
-                onSelect={({ id, name }) => {
-                    setCustomProviderId(id);
+                onSelect={({ id: pid, name }) => {
+                    setCustomProviderId(pid);
                     setCustomProviderName(name);
                 }}
                 onAddNew={handleAddNewProvider}
