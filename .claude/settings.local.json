@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc -l)",
+      "Bash(npm --version)",
+      "Bash(npm ci *)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
